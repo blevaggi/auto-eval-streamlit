@@ -2940,11 +2940,83 @@ def add_download_button(bulk_results, original_df, input_column, output_column=N
         else:
             st.dataframe(preview_df, use_container_width=True)
 
+def save_metrics_to_session(pipeline_results):
+    """
+    Save the pipeline results to session state in a JSON-serializable format
+    """
+    import json
+    
+    # Store the results in the session state
+    st.session_state.saved_pipeline_results = pipeline_results
+    
+    # Also convert to JSON for download
+    json_data = json.dumps(pipeline_results, indent=2)
+    return json_data
 
-# Main app interface
+def download_metrics_button(json_data):
+    """
+    Create a download button for the metrics
+    """
+    import datetime
+    
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"metrics_{timestamp}.json"
+    
+    st.download_button(
+        label="💾 Download Metrics as JSON",
+        data=json_data,
+        file_name=filename,
+        mime="application/json",
+    )
+
+def load_metrics_from_file():
+    """
+    Allow uploading a previously saved metrics JSON file
+    """
+    import json
+    
+    uploaded_file = st.file_uploader(
+        "Upload saved metrics JSON file", 
+        type=["json"],
+        key="metrics_uploader"
+    )
+    
+    if uploaded_file is not None:
+        try:
+            # Try to parse the JSON file
+            content = uploaded_file.read().decode("utf-8")
+            metrics_data = json.loads(content)
+            
+            # Validate that it has the expected structure
+            if not all(key in metrics_data for key in ["input", "task_analysis", "selected_metrics", "customized_metrics"]):
+                st.error("The uploaded file doesn't have the expected structure for metrics data.")
+                return None
+            
+            st.success("Metrics loaded successfully!")
+            return metrics_data
+            
+        except Exception as e:
+            st.error(f"Error loading metrics: {str(e)}")
+            return None
+    
+    return None
+
+
 def main():
     st.title("Auto-Generated Eval Pipeline")
     st.markdown("This tool helps you identify, customize, and apply evaluation metrics for your AI-generated content.")
+    
+    # Initialize auto-save session state if not exists
+    if "auto_save_enabled" not in st.session_state:
+        st.session_state.auto_save_enabled = True
+    
+    # Initialize saved metrics if not exists but we have pipeline results
+    if "saved_pipeline_results" not in st.session_state and "pipeline_results" in st.session_state and st.session_state.pipeline_results:
+        save_metrics_to_session(st.session_state.pipeline_results)
+    
+    # Load saved metrics into pipeline_results if we have saved metrics but no pipeline results
+    if "saved_pipeline_results" in st.session_state and "pipeline_results" not in st.session_state:
+        st.session_state.pipeline_results = st.session_state.saved_pipeline_results
     
     with st.sidebar:
         st.header("API Configuration")
@@ -2956,6 +3028,15 @@ def main():
             help="Model used for generating metrics and customizing rubrics"
         )
         
+        # Add auto-save toggle in sidebar
+        st.subheader("Session Settings")
+        auto_save = st.checkbox("Enable Auto-save", value=st.session_state.auto_save_enabled, 
+                              help="Automatically save metrics in session to prevent loss")
+        st.session_state.auto_save_enabled = auto_save
+        
+        if auto_save and "pipeline_results" in st.session_state and st.session_state.pipeline_results:
+            st.success("Metrics auto-saved in session")
+            
         if st.button("💾 Save Configuration"):
             if api_key:
                 st.session_state.client = initialize_client(api_key)
@@ -3018,7 +3099,36 @@ def main():
                         client=client,
                         model=st.session_state.model
                     )
+                    
+                    # Auto-save the new metrics if enabled
+                    if st.session_state.auto_save_enabled:
+                        save_metrics_to_session(st.session_state.pipeline_results)
+                        
                 st.success("Metrics customized successfully!")
+        
+        # 3. Add the Save/Load Metrics expander panel
+        with st.expander("Save/Load Metrics", expanded=False):
+            st.info("Save your current metrics or load previously generated metrics.")
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("Save Current Metrics")
+                if st.session_state.pipeline_results:
+                    json_data = save_metrics_to_session(st.session_state.pipeline_results)
+                    download_metrics_button(json_data)
+                else:
+                    st.write("No metrics to save yet.")
+            
+            with col2:
+                st.subheader("Load Saved Metrics")
+                loaded_metrics = load_metrics_from_file()
+                if loaded_metrics and st.button("Use Loaded Metrics"):
+                    st.session_state.pipeline_results = loaded_metrics
+                    # Also save to our persistent session state
+                    if st.session_state.auto_save_enabled:
+                        save_metrics_to_session(loaded_metrics)
+                    st.rerun()
                 
     # Metrics tab
     with tab2:
