@@ -3375,7 +3375,7 @@ def main():
                             max_items = st.slider(
                                 "Maximum number of items to process", 
                                 min_value=1, 
-                                max_value=min(100, len(df)), 
+                                max_value=min(500, len(df)), 
                                 value=min(20, len(df)),
                                 key="tab3_max_items",
                                 help="Limit rows to process to avoid excessive API usage"
@@ -3723,7 +3723,7 @@ def main():
                             max_items = st.slider(
                                 "Maximum number of comparisons to process", 
                                 min_value=1, 
-                                max_value=min(100, len(df)), 
+                                max_value=min(500, len(df)), 
                                 value=min(20, len(df)),
                                 help="Limit rows to process to avoid excessive API usage",
                                 key="tab4_max_items"
