@@ -144,6 +144,370 @@ def process_input(prompt: str, task_summary: str, sample_input: str,
         "context": context
     }
 
+
+def get_pretty_metric_label(metric_key: str, customized_metrics: dict) -> str:
+    """Return a descriptive label for a metric based on its customized_description.
+    
+    Works with both Library Mode and Dynamic Mode metrics.
+    """
+    try:
+        # Handle submetrics (metric::submetric format)
+        if "::" in metric_key:
+            top_metric, sub_metric = metric_key.split("::", 1)
+            
+            # Get base metric details
+            metric_details = customized_metrics[top_metric]
+            
+            # If this is a submetric and exists in the sub_metrics dict
+            if "sub_metrics" in metric_details and sub_metric in metric_details["sub_metrics"]:
+                sub_details = metric_details["sub_metrics"][sub_metric]
+                
+                # Use parameters field if available for submetrics
+                if "parameters" in sub_details and sub_details["parameters"] != "N/A":
+                    return f"{sub_metric}: {sub_details['parameters'][:50]}"
+                
+                return sub_metric
+            
+            # Default handling for top-level metrics
+            return metric_key
+        else:
+            # This is a top-level metric
+            metric_details = customized_metrics[metric_key]
+            
+            # Dynamic Mode metrics (HOW_1, WHAT_2, etc.)
+            if ("HOW_" in metric_key or "WHAT_" in metric_key) and "customized_description" in metric_details:
+                description = metric_details["customized_description"]
+                # Get the first sentence or up to a hyphen/dash
+                if "." in description:
+                    short_desc = description.split(".")[0].strip()
+                elif "–" in description:
+                    short_desc = description.split("–")[0].strip()
+                elif "-" in description:
+                    short_desc = description.split("-")[0].strip()
+                else:
+                    short_desc = description[:80].strip() + "..." if len(description) > 80 else description
+                    
+                return f"{metric_key}: {short_desc}"
+            
+            # Library Mode metrics
+            elif "customized_description" in metric_details:
+                description = metric_details["customized_description"]
+                # Try using the en-dash
+                if "–" in description:
+                    return description.split("–")[0].strip()
+                # Or a hyphen (-) if the en-dash is not found
+                elif "-" in description:
+                    return description.split("-")[0].strip()
+                # Or the first sentence
+                elif "." in description:
+                    return description.split(".")[0].strip()
+                    
+            return metric_key
+            
+    except (KeyError, TypeError):
+        return metric_key
+
+
+def generate_how_metrics(client, input_package: Dict, model: str) -> List[str]:
+    """Generate style and format based metrics (HOW metrics)"""
+    
+    system_message = """You are an AI evaluation metric system focused on identifying HOW metrics.
+    HOW metrics are style and format based metrics that evaluate the structure, presentation,
+    and mechanical aspects of content rather than the actual substance.
+    
+    Examples of HOW metrics include:
+    - Format compliance (word count, character limits, prohibited words)
+    - Style adherence (tone, voice, brand guidelines)
+    - Structural elements (layout, ordering of information)
+    - Technical specifications (capitalization, punctuation, formatting)
+    
+    When analyzing a task, focus exclusively on these mechanical aspects, not the substantive content.
+    """
+    
+    with st.spinner("Generating HOW metrics (style and format)..."):
+        # FLOW 1 Step 1: Generate initial HOW metrics list
+        prompt_1 = f"""
+        Look at the input package below. There is a key difference between WHAT and HOW metrics. 
+        What are all the HOW -- style and format based metrics we should apply to this use case? 
+        
+        INPUT PACKAGE:
+        Task Summary: {input_package['task_summary']}
+        Context: {input_package['context']}
+        Task Requirements:
+        {chr(10).join([f"- {req}" for req in input_package['requirements']])}
+        Sample Input: {input_package['sample_input']}
+        Good Examples: {input_package['good_examples']}
+        Bad Examples: {input_package['bad_examples']}
+        
+        Return a numbered list of HOW metrics that focus solely on style and formatting aspects.
+        Each item should be 1-2 sentences maximum.
+        """
+
+        response_1 = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": prompt_1}
+            ]
+        )
+        
+        initial_how_metrics = response_1.choices[0].message.content
+        
+        # Display intermediate results
+        with st.expander("Initial HOW Metrics (Style & Format)"):
+            st.write(initial_how_metrics)
+        
+        # FLOW 1 Step 2: Refine metrics to be more specific and discrete
+        prompt_2 = f"""
+        Now edit the list below to be as specific and discrete as possible. 
+        Remove anything that is actually a WHAT-aka-Content metric.
+        Break general metrics into more specific sub-metrics.
+        For example, instead of "Format compliance", specify "Character count limit" and "Prohibited words check" as separate items.
+        
+        CURRENT LIST:
+        {initial_how_metrics}
+        
+        Return a new numbered list with more specific and granular metrics.
+        Each item should be 1-2 sentences maximum.
+        """
+
+        response_2 = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": prompt_1},
+                {"role": "assistant", "content": initial_how_metrics},
+                {"role": "user", "content": prompt_2}
+            ]
+        )
+        
+        refined_how_metrics = response_2.choices[0].message.content
+        
+        # Display intermediate results
+        with st.expander("Refined HOW Metrics"):
+            st.write(refined_how_metrics)
+        
+        # FLOW 1 Step 3: Remove redundancies
+        prompt_3 = f"""
+        Look at this list of metrics. Remove any redundancies from the list. 
+        Any metrics that overlap and are overly similar will be harmful because they will double-reward and double-penalize in the results.
+        
+        CURRENT LIST:
+        {refined_how_metrics}
+        
+        Return a revised, shorter list with only unique, non-overlapping metrics.
+        While you're at it -- Remove anything that is actually a WHAT-aka-Content metric.
+        Each item should be 1-2 sentences maximum.
+        """
+
+        response_3 = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": prompt_1},
+                {"role": "assistant", "content": initial_how_metrics},
+                {"role": "user", "content": prompt_2},
+                {"role": "assistant", "content": refined_how_metrics},
+                {"role": "user", "content": prompt_3}
+            ]
+        )
+        
+        final_how_metrics = response_3.choices[0].message.content
+        
+        # Display final results
+        with st.expander("Final HOW Metrics (Redundancies Removed)"):
+            st.write(final_how_metrics)
+            
+        # Extract metrics as a list
+        metrics_list = []
+        for line in final_how_metrics.split('\n'):
+            if re.match(r'^\d+[\.\)]\s+', line.strip()):
+                # Remove number prefix and add to list
+                clean_line = re.sub(r'^\d+[\.\)]\s+', '', line.strip())
+                if clean_line:
+                    metrics_list.append(clean_line)
+        
+        return metrics_list
+
+def generate_what_metrics(client, input_package: Dict, model: str) -> List[str]:
+    """Generate content-based metrics (WHAT metrics)"""
+    
+    system_message = """You are an AI evaluation metric system focused on identifying WHAT metrics.
+    WHAT metrics are content-based metrics that evaluate the substance, information, and meaning
+    of the content rather than how it's presented.
+    
+    Examples of WHAT metrics include:
+    - Relevance (appropriate to context and user needs)
+    - Accuracy (factual correctness)
+    - Coherence (logical flow and consistency)
+    - Completeness (covers necessary information)
+    - Personalization (tailored to specific user details)
+    
+    When analyzing a task, focus exclusively on these substantive aspects, not the mechanical presentation.
+    """
+    
+    with st.spinner("Generating WHAT metrics (content)..."):
+        # FLOW 2 Step 1: Generate initial WHAT metrics list
+        prompt_1 = f"""
+        Look at the input package below. There is a key difference between WHAT and HOW metrics. 
+        What are all the WHAT -- content-based metrics we should apply to this use case? 
+        
+        INPUT PACKAGE:
+        Task Summary: {input_package['task_summary']}
+        Context: {input_package['context']}
+        Task Requirements:
+        {chr(10).join([f"- {req}" for req in input_package['requirements']])}
+        Sample Input: {input_package['sample_input']}
+        Good Examples: {input_package['good_examples']}
+        Bad Examples: {input_package['bad_examples']}
+        
+        Return a numbered list of WHAT metrics that focus solely on content-based aspects.
+        Each item should be 1-2 sentences maximum.
+        """
+
+        response_1 = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": prompt_1}
+            ]
+        )
+        
+        initial_what_metrics = response_1.choices[0].message.content
+        
+        # Display intermediate results
+        with st.expander("Initial WHAT Metrics (Content)"):
+            st.write(initial_what_metrics)
+        
+        # FLOW 2 Step 2: Refine metrics to be more specific and discrete
+        prompt_2 = f"""
+        Now edit the list below to be as specific and discrete as possible. 
+        Break general metrics into more specific sub-metrics.
+        For example, instead of "Relevance", specify "Product relevance" and "User query relevance" as separate items.
+        
+        CURRENT LIST:
+        {initial_what_metrics}
+        
+        Return a new numbered list with more specific and granular metrics.
+        Each item should be 1-2 sentences maximum.
+        """
+
+        response_2 = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": prompt_1},
+                {"role": "assistant", "content": initial_what_metrics},
+                {"role": "user", "content": prompt_2}
+            ]
+        )
+        
+        refined_what_metrics = response_2.choices[0].message.content
+        
+        # Display intermediate results
+        with st.expander("Refined WHAT Metrics"):
+            st.write(refined_what_metrics)
+        
+        # FLOW 2 Step 3: Remove redundancies
+        prompt_3 = f"""
+        Look at this list of metrics. Remove any redundancies from the list. 
+        Any metrics that overlap and are overly similar will be harmful because they will double-reward and double-penalize in the results.
+        
+        CURRENT LIST:
+        {refined_what_metrics}
+        
+        Return a revised, shorter list with only unique, non-overlapping metrics.
+        Each item should be 1-2 sentences maximum.
+        """
+
+        response_3 = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": prompt_1},
+                {"role": "assistant", "content": initial_what_metrics},
+                {"role": "user", "content": prompt_2},
+                {"role": "assistant", "content": refined_what_metrics},
+                {"role": "user", "content": prompt_3}
+            ]
+        )
+        
+        final_what_metrics = response_3.choices[0].message.content
+        
+        # Display final results
+        with st.expander("Final WHAT Metrics (Redundancies Removed)"):
+            st.write(final_what_metrics)
+            
+        # Extract metrics as a list
+        metrics_list = []
+        for line in final_what_metrics.split('\n'):
+            if re.match(r'^\d+[\.\)]\s+', line.strip()):
+                # Remove number prefix and add to list
+                clean_line = re.sub(r'^\d+[\.\)]\s+', '', line.strip())
+                if clean_line:
+                    metrics_list.append(clean_line)
+        
+        return metrics_list
+
+def run_dynamic_pipeline(prompt: str, task_summary: str, sample_input: str,
+                         good_examples: List[str], bad_examples: List[str], 
+                         context: str, requirements: List[str],
+                         client, model: str) -> Dict[str, Any]:
+    """
+    Run the dynamic mode pipeline that uses prompt-based generation of metrics.
+    It calls generate_how_metrics() and generate_what_metrics() to derive dynamic metrics.
+    Maps the generated metrics into a structure similar to Library Mode.
+    """
+    # Build an input package that now also includes requirements.
+    input_package = {
+        "prompt": prompt,
+        "task_summary": task_summary,
+        "sample_input": sample_input,
+        "good_examples": good_examples,
+        "bad_examples": bad_examples,
+        "context": context,
+        "requirements": requirements  # New field for dynamic mode
+    }
+
+    # Generate style/format (HOW) metrics and content-based (WHAT) metrics.
+    how_metrics = generate_how_metrics(client, input_package, model)
+    what_metrics = generate_what_metrics(client, input_package, model)
+
+    # Map these lists into a dictionary that mimics the library structure.
+    # For example, create metric keys for each dynamic metric.
+    selected_metrics = []
+    customized_metrics = {}
+
+    for idx, metric in enumerate(how_metrics, 1):
+        metric_key = f"HOW_{idx}"
+        selected_metrics.append(metric_key)
+        # You could add further customization if needed.
+        customized_metrics[metric_key] = {
+            "customized_description": metric,
+            "parameters": "N/A",
+            "success_criteria": "N/A",
+            "scoring_rubric": "N/A",
+            "examples": []  # Optionally, add examples if you wish.
+        }
+    for idx, metric in enumerate(what_metrics, 1):
+        metric_key = f"WHAT_{idx}"
+        selected_metrics.append(metric_key)
+        customized_metrics[metric_key] = {
+            "customized_description": metric,
+            "parameters": "N/A",
+            "success_criteria": "N/A",
+            "scoring_rubric": "N/A",
+            "examples": []
+        }
+
+    # Return a unified dictionary with the same keys as Library Mode.
+    return {
+        "input": input_package,
+        "selected_metrics": selected_metrics,
+        "customized_metrics": customized_metrics
+    }
+
+
 def retrieve_relevant_metrics(client, input_package: Dict, model: str) -> Dict:
     """Use LLM to define relevant metrics based on the input context"""
     
@@ -524,18 +888,67 @@ def group_evaluation_results(evaluation_list):
     return grouped
 
 
+# def display_grouped_results(formatted_results, eval_results):
+#     """
+#     Displays evaluation results in a nested format by grouping 
+#     top-level metrics and sub-metrics.
+
+#     :param formatted_results: A dict keyed by metric strings like 
+#         "Format::overall" or "Style::style.tone".
+#         Each value is another dict with keys "score" and "justification".
+#     :param eval_results: The raw string output from your LLM evaluations, 
+#         keyed by the same metric strings.
+#     """
+#     # 1) Build a nested structure, grouping by top-level metric
+#     grouped_results = defaultdict(list)
+    
+#     for metric_key, data in formatted_results.items():
+#         # Parse out top-level metric vs. sub-metric
+#         if "::" in metric_key:
+#             top_metric, sub_metric = metric_key.split("::", 1)
+#         else:
+#             top_metric = metric_key
+#             sub_metric = None
+
+#         grouped_results[top_metric].append({
+#             "sub_metric": sub_metric,
+#             "score": data["score"],
+#             "justification": data["justification"],
+#             "raw_eval": eval_results[metric_key],  # Full LLM response
+#         })
+
+#     # 2) Display in a nested format
+#     for top_metric, entries in grouped_results.items():
+#         # Show the top-level metric name
+#         st.subheader(top_metric)
+
+#         # (Optional) Sort so that sub_metric == "overall" (or None) appears first
+#         entries.sort(key=lambda x: (
+#             # Put "overall" or None first, then alphabetical
+#             x["sub_metric"] is not None and "overall" not in x["sub_metric"], 
+#             x["sub_metric"] or ""
+#         ))
+
+#         for entry in entries:
+#             sub_label = entry["sub_metric"] if entry["sub_metric"] else "overall"
+#             expander_title = f"{top_metric}::{sub_label} (Score: {entry['score']})"
+#             with st.expander(expander_title):
+#                 st.markdown(f"**Score:** {entry['score']}")
+#                 st.markdown(f"**Justification:** {entry['justification']}")
+#                 st.markdown("**Raw Evaluation:**")
+#                 st.text_area(
+#                     label="",
+#                     value=entry["raw_eval"],
+#                     height=200,
+#                     disabled=True
+#                 )
+
 def display_grouped_results(formatted_results, eval_results):
     """
     Displays evaluation results in a nested format by grouping 
-    top-level metrics and sub-metrics.
-
-    :param formatted_results: A dict keyed by metric strings like 
-        "Format::overall" or "Style::style.tone".
-        Each value is another dict with keys "score" and "justification".
-    :param eval_results: The raw string output from your LLM evaluations, 
-        keyed by the same metric strings.
+    top-level metric name and using a descriptive label
     """
-    # 1) Build a nested structure, grouping by top-level metric
+    from collections import defaultdict
     grouped_results = defaultdict(list)
     
     for metric_key, data in formatted_results.items():
@@ -553,21 +966,39 @@ def display_grouped_results(formatted_results, eval_results):
             "raw_eval": eval_results[metric_key],  # Full LLM response
         })
 
-    # 2) Display in a nested format
+    # Display in a nested format
     for top_metric, entries in grouped_results.items():
-        # Show the top-level metric name
-        st.subheader(top_metric)
+        # Get a descriptive title for the top metric from customized_metrics
+        metric_details = st.session_state.pipeline_results["customized_metrics"].get(top_metric, {})
+        if "customized_description" in metric_details:
+            description = metric_details["customized_description"]
+            # Get first sentence or phrase
+            description_short = description.split(".")[0]
+            metric_title = f"{top_metric}: {description_short}"
+        else:
+            metric_title = top_metric
+            
+        st.subheader(metric_title)
 
-        # (Optional) Sort so that sub_metric == "overall" (or None) appears first
+        # Sort entries so "overall" comes first
         entries.sort(key=lambda x: (
-            # Put "overall" or None first, then alphabetical
             x["sub_metric"] is not None and "overall" not in x["sub_metric"], 
             x["sub_metric"] or ""
         ))
 
         for entry in entries:
-            sub_label = entry["sub_metric"] if entry["sub_metric"] else "overall"
-            expander_title = f"{top_metric}::{sub_label} (Score: {entry['score']})"
+            # For submetrics, get a descriptive label
+            if entry["sub_metric"]:
+                sub_label = entry["sub_metric"]
+                sub_details = metric_details.get("sub_metrics", {}).get(sub_label, {})
+                if sub_details and "parameters" in sub_details and sub_details["parameters"] != "N/A":
+                    sub_title = f"{sub_label}: {sub_details['parameters'][:50]}..."
+                else:
+                    sub_title = sub_label
+            else:
+                sub_title = "Overall"
+
+            expander_title = f"{sub_title} (Score: {entry['score']})"
             with st.expander(expander_title):
                 st.markdown(f"**Score:** {entry['score']}")
                 st.markdown(f"**Justification:** {entry['justification']}")
@@ -579,15 +1010,111 @@ def display_grouped_results(formatted_results, eval_results):
                     disabled=True
                 )
 
-def display_grouped_pairwise_results(formatted_results, pairwise_results):
-    """Display pairwise results grouped by metric category"""
-    from collections import defaultdict
+
+# def display_grouped_pairwise_results(formatted_results, pairwise_results):
+#     """Display pairwise results grouped by metric category"""
+#     from collections import defaultdict
     
+#     # Remove special keys
+#     display_results = {k: v for k, v in formatted_results.items() 
+#                       if k not in ["OVERALL", "CATEGORIES"]}
+    
+#     # Group by top-level metric
+#     grouped_results = defaultdict(list)
+#     for metric_key, data in display_results.items():
+#         if "::" in metric_key:
+#             top_metric, sub_metric = metric_key.split("::", 1)
+#         else:
+#             top_metric = metric_key
+#             sub_metric = None
+            
+#         grouped_results[top_metric].append({
+#             "sub_metric": sub_metric,
+#             "winner": data["winner"],
+#             "justification": data["justification"],
+#             "raw_eval": pairwise_results[metric_key]
+#         })
+    
+#     # Display category results
+#     category_results = formatted_results.get("CATEGORIES", {})
+    
+#     # Create visual summary of category winners
+#     categories = list(category_results.keys())
+#     if categories:
+#         st.subheader("Results by Category")
+        
+#         for category, result in category_results.items():
+#             winner = result["winner"]
+#             summary = result["summary"]
+            
+#             # Choose color based on winner
+#             color = "#4CAF50" if winner == "A" else "#2196F3" if winner == "B" else "#9E9E9E"  # Green for A, Blue for B, Gray for Tie
+            
+#             st.markdown(f"""
+#             <div style="
+#                 padding: 10px; 
+#                 border-left: 5px solid {color}; 
+#                 background-color: {color}10;
+#                 margin-bottom: 10px;
+#             ">
+#                 <h3>{category}: Output {winner} is better overall</h3>
+#                 <p>{summary}</p>
+#             </div>
+#             """, unsafe_allow_html=True)
+    
+#     # Display detailed results by category
+#     for top_metric, entries in grouped_results.items():
+#         st.subheader(f"{top_metric} Metrics")
+        
+#         # Sort entries so "overall" comes first
+#         entries.sort(key=lambda x: (
+#             0 if x["sub_metric"] is None or x["sub_metric"] == "overall" else 1,
+#             x["sub_metric"] or ""
+#         ))
+        
+#         for entry in entries:
+#             sub_label = entry["sub_metric"] if entry["sub_metric"] else "overall"
+#             winner = entry["winner"]
+            
+#             # Choose icon and color based on winner
+#             if "A is better" in winner:
+#                 icon = "🅰️"
+#                 color = "#4CAF50"  # Green
+#             elif "B is better" in winner:
+#                 icon = "🅱️"
+#                 color = "#2196F3"  # Blue
+#             else:  # Equivalent
+#                 icon = "🔄"
+#                 color = "#9E9E9E"  # Gray
+            
+#             expander_title = f"{icon} {top_metric}::{sub_label} - {winner}"
+            
+#             with st.expander(expander_title):
+#                 st.markdown(f"""
+#                 <div style="
+#                     padding: 10px; 
+#                     border-left: 5px solid {color}; 
+#                     background-color: {color}10;
+#                 ">
+#                     <h3>{winner}</h3>
+#                 </div>
+#                 """, unsafe_allow_html=True)
+                
+#                 st.markdown(f"**Justification:** {entry['justification']}")
+                
+#                 # Show raw evaluation 
+#                 show_raw = st.checkbox(f"Show Raw Evaluation", key=f"pairwise_raw_{top_metric}_{sub_label}")
+#                 if show_raw:
+#                     st.text_area("Raw Evaluation", entry["raw_eval"], height=200, disabled=True)
+
+def display_grouped_pairwise_results(formatted_results, pairwise_results):
+    """Display pairwise results grouped by metric category with descriptive labels."""
+    from collections import defaultdict
+
     # Remove special keys
     display_results = {k: v for k, v in formatted_results.items() 
-                      if k not in ["OVERALL", "CATEGORIES"]}
+                       if k not in ["OVERALL", "CATEGORIES"]}
     
-    # Group by top-level metric
     grouped_results = defaultdict(list)
     for metric_key, data in display_results.items():
         if "::" in metric_key:
@@ -603,77 +1130,42 @@ def display_grouped_pairwise_results(formatted_results, pairwise_results):
             "raw_eval": pairwise_results[metric_key]
         })
     
-    # Display category results
-    category_results = formatted_results.get("CATEGORIES", {})
-    
-    # Create visual summary of category winners
-    categories = list(category_results.keys())
-    if categories:
-        st.subheader("Results by Category")
-        
-        for category, result in category_results.items():
-            winner = result["winner"]
-            summary = result["summary"]
-            
-            # Choose color based on winner
-            color = "#4CAF50" if winner == "A" else "#2196F3" if winner == "B" else "#9E9E9E"  # Green for A, Blue for B, Gray for Tie
-            
-            st.markdown(f"""
-            <div style="
-                padding: 10px; 
-                border-left: 5px solid {color}; 
-                background-color: {color}10;
-                margin-bottom: 10px;
-            ">
-                <h3>{category}: Output {winner} is better overall</h3>
-                <p>{summary}</p>
-            </div>
-            """, unsafe_allow_html=True)
+    # Display category results (unchanged)...
     
     # Display detailed results by category
     for top_metric, entries in grouped_results.items():
-        st.subheader(f"{top_metric} Metrics")
+        pretty_top_label = get_pretty_metric_label(top_metric, st.session_state.pipeline_results["customized_metrics"])
+        st.subheader(f"{pretty_top_label} Metrics")
         
-        # Sort entries so "overall" comes first
         entries.sort(key=lambda x: (
             0 if x["sub_metric"] is None or x["sub_metric"] == "overall" else 1,
             x["sub_metric"] or ""
         ))
         
         for entry in entries:
-            sub_label = entry["sub_metric"] if entry["sub_metric"] else "overall"
+            if entry["sub_metric"]:
+                pretty_label = get_pretty_metric_label(f"{top_metric}::{entry['sub_metric']}", st.session_state.pipeline_results["customized_metrics"])
+            else:
+                pretty_label = pretty_top_label
+
             winner = entry["winner"]
-            
-            # Choose icon and color based on winner
             if "A is better" in winner:
                 icon = "🅰️"
-                color = "#4CAF50"  # Green
+                color = "#4CAF50"
             elif "B is better" in winner:
                 icon = "🅱️"
-                color = "#2196F3"  # Blue
-            else:  # Equivalent
+                color = "#2196F3"
+            else:
                 icon = "🔄"
-                color = "#9E9E9E"  # Gray
+                color = "#9E9E9E"
             
-            expander_title = f"{icon} {top_metric}::{sub_label} - {winner}"
-            
+            expander_title = f"{icon} {pretty_label} - {winner}"
             with st.expander(expander_title):
-                st.markdown(f"""
-                <div style="
-                    padding: 10px; 
-                    border-left: 5px solid {color}; 
-                    background-color: {color}10;
-                ">
-                    <h3>{winner}</h3>
-                </div>
-                """, unsafe_allow_html=True)
-                
                 st.markdown(f"**Justification:** {entry['justification']}")
-                
-                # Show raw evaluation 
-                show_raw = st.checkbox(f"Show Raw Evaluation", key=f"pairwise_raw_{top_metric}_{sub_label}")
+                show_raw = st.checkbox(f"Show Raw Evaluation", key=f"pairwise_raw_{top_metric}_{pretty_label}")
                 if show_raw:
                     st.text_area("Raw Evaluation", entry["raw_eval"], height=200, disabled=True)
+
 
 def generate_evaluation_prompts(result, output, model: str):
     """Generate evaluation prompts for each selected metric, skipping the top-level
@@ -1396,11 +1888,7 @@ def calculate_aggregate_metrics(bulk_results):
 
 def display_bulk_results(bulk_results, aggregates):
     """
-    Display results from bulk processing with visualizations
-    
-    Args:
-        bulk_results: List of evaluation results
-        aggregates: Dict with aggregate statistics
+    Display results from bulk processing with visualizations using descriptive metric labels
     """
     import pandas as pd
     import altair as alt
@@ -1411,11 +1899,15 @@ def display_bulk_results(bulk_results, aggregates):
     # 1. Overall summary statistics
     st.subheader("Summary Statistics")
     
-    # Convert aggregates to a dataframe for display
+    # Convert aggregates to a dataframe for display with descriptive labels
     summary_data = []
     for metric, stats in aggregates.items():
+        # Get descriptive label for this metric
+        metric_label = get_pretty_metric_label(metric, st.session_state.pipeline_results["customized_metrics"])
+        
         summary_data.append({
-            "Metric": metric,
+            "Metric": metric_label,  # Use descriptive label
+            "Metric Key": metric,    # Keep original key for reference
             "Mean Score": f"{stats['mean']:.2f}",
             "Median": f"{stats['median']:.2f}",
             "Min": f"{stats['min']:.2f}",
@@ -1439,8 +1931,11 @@ def display_bulk_results(bulk_results, aggregates):
     
     # Create distribution charts by category
     for category, metrics in metrics_by_category.items():
-        with st.expander(f"{category} Metrics", expanded=True):
-            # Prepare data for visualization
+        # Get descriptive label for category
+        category_label = get_pretty_metric_label(category, st.session_state.pipeline_results["customized_metrics"])
+        
+        with st.expander(f"{category_label} Metrics", expanded=True):
+            # Prepare data for visualization with descriptive labels
             all_scores = []
             
             for result in bulk_results:
@@ -1448,8 +1943,17 @@ def display_bulk_results(bulk_results, aggregates):
                     if metric in result["evaluations"]:
                         try:
                             score = float(result["evaluations"][metric]["score"])
+                            
+                            # Get descriptive metric label
+                            if "::" in metric:
+                                sub_metric = metric.split("::")[-1]
+                                metric_label = get_pretty_metric_label(metric, st.session_state.pipeline_results["customized_metrics"])
+                            else:
+                                metric_label = get_pretty_metric_label(metric, st.session_state.pipeline_results["customized_metrics"])
+                            
                             all_scores.append({
-                                "Metric": metric.split("::")[-1] if "::" in metric else metric,
+                                "Metric": metric_label,  # Use descriptive label
+                                "Original Key": metric,  # Keep original for reference
                                 "Score": score
                             })
                         except (ValueError, TypeError):
@@ -1467,7 +1971,7 @@ def display_bulk_results(bulk_results, aggregates):
                 ).properties(
                     width=600,
                     height=300,
-                    title=f"{category} Score Distribution"
+                    title=f"{category_label} Score Distribution"
                 )
                 
                 st.altair_chart(chart, use_container_width=True)
@@ -1488,6 +1992,101 @@ def display_bulk_results(bulk_results, aggregates):
                 )
                 
                 st.altair_chart(avg_chart, use_container_width=True)
+
+# def display_bulk_results(bulk_results, aggregates):
+#     """
+#     Display results from bulk processing with visualizations
+    
+#     Args:
+#         bulk_results: List of evaluation results
+#         aggregates: Dict with aggregate statistics
+#     """
+#     import pandas as pd
+#     import altair as alt
+#     from collections import defaultdict
+    
+#     st.header("Bulk Evaluation Results")
+    
+#     # 1. Overall summary statistics
+#     st.subheader("Summary Statistics")
+    
+#     # Convert aggregates to a dataframe for display
+#     summary_data = []
+#     for metric, stats in aggregates.items():
+#         summary_data.append({
+#             "Metric": metric,
+#             "Mean Score": f"{stats['mean']:.2f}",
+#             "Median": f"{stats['median']:.2f}",
+#             "Min": f"{stats['min']:.2f}",
+#             "Max": f"{stats['max']:.2f}",
+#             "Std Dev": f"{stats['std']:.2f}",
+#             "Count": stats['count']
+#         })
+    
+#     if summary_data:
+#         summary_df = pd.DataFrame(summary_data)
+#         st.dataframe(summary_df, use_container_width=True)
+    
+#     # 2. Score distribution charts
+#     st.subheader("Score Distributions")
+    
+#     # Group metrics by category
+#     metrics_by_category = defaultdict(list)
+#     for metric in aggregates.keys():
+#         category = metric.split("::")[0] if "::" in metric else metric
+#         metrics_by_category[category].append(metric)
+    
+#     # Create distribution charts by category
+#     for category, metrics in metrics_by_category.items():
+#         with st.expander(f"{category} Metrics", expanded=True):
+#             # Prepare data for visualization
+#             all_scores = []
+            
+#             for result in bulk_results:
+#                 for metric in metrics:
+#                     if metric in result["evaluations"]:
+#                         try:
+#                             score = float(result["evaluations"][metric]["score"])
+#                             all_scores.append({
+#                                 "Metric": metric.split("::")[-1] if "::" in metric else metric,
+#                                 "Score": score
+#                             })
+#                         except (ValueError, TypeError):
+#                             pass
+            
+#             if all_scores:
+#                 df = pd.DataFrame(all_scores)
+                
+#                 # Create a histogram of scores
+#                 chart = alt.Chart(df).mark_bar().encode(
+#                     x=alt.X('Score:Q', bin=True, title='Score'),
+#                     y=alt.Y('count()', title='Count'),
+#                     color=alt.Color('Metric:N', legend=alt.Legend(orient='top')),
+#                     tooltip=['Metric', 'Score', 'count()']
+#                 ).properties(
+#                     width=600,
+#                     height=300,
+#                     title=f"{category} Score Distribution"
+#                 )
+                
+#                 st.altair_chart(chart, use_container_width=True)
+                
+#                 # Show average scores
+#                 avg_df = df.groupby('Metric')['Score'].mean().reset_index()
+#                 avg_df['Score'] = avg_df['Score'].round(2)
+                
+#                 avg_chart = alt.Chart(avg_df).mark_bar().encode(
+#                     x=alt.X('Score:Q', scale=alt.Scale(domain=[0, 2])),
+#                     y=alt.Y('Metric:N', sort='-x'),
+#                     color=alt.Color('Score:Q', scale=alt.Scale(domain=[0, 1, 2], range=['#f8696b', '#ffeb84', '#63be7b'])),
+#                     tooltip=['Metric', 'Score']
+#                 ).properties(
+#                     width=600, 
+#                     height=min(len(avg_df) * 40, 300),
+#                     title="Average Scores"
+#                 )
+                
+#                 st.altair_chart(avg_chart, use_container_width=True)
     
     # 3. Detailed results table with filtering
     st.subheader("Detailed Results")
@@ -1921,15 +2520,7 @@ def format_pairwise_evaluation_results(eval_results):
 
 def create_metric_selection_ui(metrics_library, key_prefix=""):
     """
-    Create a hierarchical metric selection UI that allows selecting/deselecting
-    individual submetrics
-    
-    Args:
-        metrics_library: Dictionary of metrics from pipeline results
-        key_prefix: Prefix for session state keys to avoid conflicts
-        
-    Returns:
-        Dictionary mapping metric and submetric keys to boolean selection status
+    Create a hierarchical metric selection UI with more descriptive labels
     """
     import streamlit as st
     from collections import defaultdict
@@ -1943,12 +2534,25 @@ def create_metric_selection_ui(metrics_library, key_prefix=""):
         
         # For each metric in the library
         for metric_name, metric_details in metrics_library.items():
+            # Get a descriptive label for this metric
+            if "customized_description" in metric_details:
+                # Extract the first sentence or phrase from the description
+                description = metric_details["customized_description"]
+                # Limit to first 80 characters for readability
+                if len(description) > 80:
+                    short_desc = description[:77] + "..."
+                else:
+                    short_desc = description
+                display_name = f"{metric_name}: {short_desc}"
+            else:
+                display_name = metric_name
+                
             # Create a column for this metric
             col1, col2 = st.columns([0.8, 0.2])
             
             with col1:
-                # Add the metric name as a header
-                st.markdown(f"**{metric_name}**")
+                # Add the metric name with description as a header
+                st.markdown(f"**{display_name}**")
                 
             with col2:
                 # Add a checkbox for the entire metric
@@ -1970,8 +2574,14 @@ def create_metric_selection_ui(metrics_library, key_prefix=""):
                     
                     # For each submetric
                     for sub_name in metric_details["sub_metrics"].keys():
-                        # Generate a friendly display name
-                        display_name = sub_name.replace(f"{metric_name.lower()}.", "").replace("_", " ").title()
+                        # Try to get a description for this submetric
+                        sub_details = metric_details["sub_metrics"][sub_name]
+                        if "parameters" in sub_details and sub_details["parameters"] != "N/A":
+                            # Generate a friendly display name with description
+                            display_name = f"{sub_name}: {sub_details['parameters'][:50]}..."
+                        else:
+                            # Generate a friendly display name
+                            display_name = sub_name.replace(f"{metric_name.lower()}.", "").replace("_", " ").title()
                         
                         # Create a unique key for this submetric
                         submetric_key = f"{metric_name}::{sub_name}"
@@ -2534,13 +3144,8 @@ Provide detailed justification for your comparison, focusing solely on this metr
 
 def display_bulk_pairwise_results(bulk_results, aggregates):
     """
-    Display results from bulk pairwise processing with visualizations
-    
-    Args:
-        bulk_results: List of pairwise evaluation results
-        aggregates: Dict with aggregate statistics
+    Display results from bulk pairwise processing with descriptive metric labels
     """
-    import streamlit as st
     import pandas as pd
     import altair as alt
     from collections import defaultdict
@@ -2550,57 +3155,22 @@ def display_bulk_pairwise_results(bulk_results, aggregates):
     # 1. Overall summary statistics
     st.subheader("Summary Statistics")
     
-    overall = aggregates["overall"]
-    total = overall["total"]
-    
-    # Calculate percentages
-    a_percent = (overall["a_wins"] / total) * 100 if total > 0 else 0
-    b_percent = (overall["b_wins"] / total) * 100 if total > 0 else 0
-    tie_percent = (overall["ties"] / total) * 100 if total > 0 else 0
-    
-    # Display summary
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric("Output A Wins", f"{overall['a_wins']} ({a_percent:.1f}%)")
-    
-    with col2:
-        st.metric("Output B Wins", f"{overall['b_wins']} ({b_percent:.1f}%)")
-        
-    with col3:
-        st.metric("Ties", f"{overall['ties']} ({tie_percent:.1f}%)")
-    
-    # Create a pie chart of overall results
-    overall_data = pd.DataFrame([
-        {"category": "Output A Wins", "value": overall["a_wins"]},
-        {"category": "Output B Wins", "value": overall["b_wins"]},
-        {"category": "Ties", "value": overall["ties"]}
-    ])
-    
-    pie_chart = alt.Chart(overall_data).mark_arc().encode(
-        theta=alt.Theta(field="value", type="quantitative"),
-        color=alt.Color(field="category", type="nominal", 
-                       scale=alt.Scale(domain=["Output A Wins", "Output B Wins", "Ties"],
-                                      range=["#4CAF50", "#2196F3", "#9E9E9E"])),
-        tooltip=["category", "value"]
-    ).properties(
-        width=400,
-        height=300,
-        title="Overall Results Distribution"
-    )
-    
-    st.altair_chart(pie_chart, use_container_width=True)
+    # ... (keep existing code) ...
     
     # 2. Results by metric
     st.subheader("Results by Metric")
     
-    # Prepare data for visualization
+    # Prepare data for visualization with descriptive labels
     metrics_data = []
     for metric_name, results in aggregates["metrics"].items():
         total_metric = results["a_wins"] + results["b_wins"] + results["ties"]
         if total_metric > 0:
+            # Get descriptive label
+            metric_label = get_pretty_metric_label(metric_name, st.session_state.pipeline_results["customized_metrics"])
+            
             metrics_data.append({
-                "Metric": metric_name,
+                "Metric": metric_label,  # Descriptive label
+                "Metric Key": metric_name,  # Original key
                 "Output A Wins": results["a_wins"],
                 "Output B Wins": results["b_wins"],
                 "Ties": results["ties"],
@@ -2610,13 +3180,13 @@ def display_bulk_pairwise_results(bulk_results, aggregates):
             })
     
     if metrics_data:
-        # Create a stacked bar chart
+        # Create a stacked bar chart with descriptive labels
         metrics_df = pd.DataFrame(metrics_data)
         
         # Melt the dataframe for visualization
         melted_df = pd.melt(
             metrics_df, 
-            id_vars=["Metric"], 
+            id_vars=["Metric", "Metric Key"], 
             value_vars=["Output A Wins", "Output B Wins", "Ties"],
             var_name="Result",
             value_name="Count"
@@ -2969,27 +3539,66 @@ def download_metrics_button(json_data):
         mime="application/json",
     )
 
+# def load_metrics_from_file():
+#     """
+#     Allow uploading a previously saved metrics JSON file
+#     """
+#     import json
+    
+#     uploaded_file = st.file_uploader(
+#         "Upload saved metrics JSON file", 
+#         type=["json"],
+#         key="metrics_uploader"
+#     )
+    
+#     if uploaded_file is not None:
+#         try:
+#             # Try to parse the JSON file
+#             content = uploaded_file.read().decode("utf-8")
+#             metrics_data = json.loads(content)
+            
+#             # Validate that it has the expected structure
+#             if not all(key in metrics_data for key in ["input", "task_analysis", "selected_metrics", "customized_metrics"]):
+#                 st.error("The uploaded file doesn't have the expected structure for metrics data.")
+#                 return None
+            
+#             st.success("Metrics loaded successfully!")
+#             return metrics_data
+            
+#         except Exception as e:
+#             st.error(f"Error loading metrics: {str(e)}")
+#             return None
+    
+#     return None
+
 def load_metrics_from_file():
     """
-    Allow uploading a previously saved metrics JSON file
+    Allow uploading a previously saved metrics JSON file.
+    This function now supports both Library Mode (which includes task_analysis)
+    and Dynamic Mode (which does not include task_analysis).
     """
     import json
-    
+
     uploaded_file = st.file_uploader(
         "Upload saved metrics JSON file", 
         type=["json"],
         key="metrics_uploader"
     )
-    
+
     if uploaded_file is not None:
         try:
-            # Try to parse the JSON file
             content = uploaded_file.read().decode("utf-8")
             metrics_data = json.loads(content)
             
-            # Validate that it has the expected structure
-            if not all(key in metrics_data for key in ["input", "task_analysis", "selected_metrics", "customized_metrics"]):
-                st.error("The uploaded file doesn't have the expected structure for metrics data.")
+            # Define the minimal required keys.
+            required_keys = ["input", "selected_metrics", "customized_metrics"]
+            
+            # Validate that the uploaded JSON contains the required keys.
+            if not all(key in metrics_data for key in required_keys):
+                st.error(
+                    "The uploaded file doesn't have the expected structure for metrics data. "
+                    "Expected keys: " + ", ".join(required_keys)
+                )
                 return None
             
             st.success("Metrics loaded successfully!")
@@ -2998,45 +3607,59 @@ def load_metrics_from_file():
         except Exception as e:
             st.error(f"Error loading metrics: {str(e)}")
             return None
-    
+
     return None
 
 
 def main():
-    st.title("Auto-Generated Eval Pipeline")
-    st.markdown("This tool helps you identify, customize, and apply evaluation metrics for your AI-generated content.")
+    # st.set_page_config(
+    #     page_title="Auto-Eval Selection & Evaluation Demo",
+    #     page_icon="📊",
+    #     layout="wide"
+    # )
+
     
-    # Initialize auto-save session state if not exists
+
+    # Initialize session state variables if not already set
     if "auto_save_enabled" not in st.session_state:
         st.session_state.auto_save_enabled = True
-    
-    # Initialize saved metrics if not exists but we have pipeline results
-    if "saved_pipeline_results" not in st.session_state and "pipeline_results" in st.session_state and st.session_state.pipeline_results:
-        save_metrics_to_session(st.session_state.pipeline_results)
-    
-    # Load saved metrics into pipeline_results if we have saved metrics but no pipeline results
-    if "saved_pipeline_results" in st.session_state and "pipeline_results" not in st.session_state:
-        st.session_state.pipeline_results = st.session_state.saved_pipeline_results
-    
+    if "pipeline_results" not in st.session_state:
+        st.session_state.pipeline_results = None
+    if "eval_mode" not in st.session_state:
+        st.session_state.eval_mode = "Library Mode"
+    if "client" not in st.session_state:
+        st.session_state.client = None
+    if "model" not in st.session_state:
+        st.session_state.model = "o3-mini-2025-01-31"
+    st.title("Auto-Generated Eval Pipeline")
+
+    st.text("This pipeline will help you identify the right eval metrics for your use case automatically using chained reasoning LLMs. Within this same tool you can then upload generated outputs and run evaluation on them using one or models of your choice. ")
+    st.text("""There are two main modes for auto-eval generation.
+            
+            1. Library Mode - where the tool generates eval metrics but then has to map them against a pre-built internal library of common eval metrics. This ensures consistency of language, but may limit the eval metrics that you end up with.
+
+            2. Dynamic Mode - where the tool generates eval metrics that fall into two buckets: What Metrics (which deal with the actual content of the outputs), and How Metrics (which deal with format and style of the outputs)
+    """)
+
+    # Sidebar: API configuration and new Evaluation Mode toggle.
     with st.sidebar:
         st.header("API Configuration")
         api_key = st.text_input("OpenAI API Key", type="password")
         model = st.selectbox(
             "Metric Generation Model", 
-            ["o3-mini-2025-01-31","o1-2024-12-17", "gpt-4o-2024-05-13"], 
+            ["o3-mini-2025-01-31", "o1-2024-12-17", "gpt-4o-2024-05-13"], 
             index=0,
             help="Model used for generating metrics and customizing rubrics"
         )
-        
-        # Add auto-save toggle in sidebar
-        st.subheader("Session Settings")
-        auto_save = st.checkbox("Enable Auto-save", value=st.session_state.auto_save_enabled, 
-                              help="Automatically save metrics in session to prevent loss")
-        st.session_state.auto_save_enabled = auto_save
-        
-        if auto_save and "pipeline_results" in st.session_state and st.session_state.pipeline_results:
-            st.success("Metrics auto-saved in session")
-            
+        # New toggle to select evaluation mode.
+        eval_mode = st.radio(
+            "Select Evaluation Mode",
+            options=["Library Mode", "Dynamic Mode"],
+            index=0,
+            help="Library Mode uses a pre-supplied metrics library; Dynamic Mode generates metrics on the fly."
+        )
+        st.session_state.eval_mode = eval_mode  # Save mode in session state.
+
         if st.button("💾 Save Configuration"):
             if api_key:
                 st.session_state.client = initialize_client(api_key)
@@ -3044,66 +3667,63 @@ def main():
                 st.success("Configuration saved!")
             else:
                 st.error("Please provide an API key")
-    
-    # Initialize tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["Input Configuration", "Customized Metrics", "Single Evaluation","Pairwise Evaluation"])
-    
-    # Session state to track our pipeline progress
-    if "pipeline_results" not in st.session_state:
-        st.session_state.pipeline_results = None
-    if "model" not in st.session_state:
-        st.session_state.model = model
-    
-    # Input tab
+
+    # In the task configuration tab, add a text area for Task Requirements.
+    tab1, tab2, tab3, tab4 = st.tabs(["Input Configuration", "Customized Metrics", "Single Evaluation", "Pairwise Evaluation"])
     with tab1:
         st.header("Task Configuration")
-        
-        st.info("Configure your task details to generate customized evaluation metrics. This information helps identify what makes a high-quality output for your specific use case.")
-        
-        task_summary = st.text_input("Task Summary", placeholder="E.g., Generate a credit card headline -- the what + the why")
+        st.info("Configure your task details to generate customized evaluation metrics.")
+        task_summary = st.text_input("Task Summary", placeholder="E.g., Generate a credit card headline")
         context = st.text_area("Context", placeholder="Describe where and how this content will be used", height=100)
-        
+        # New field required for Dynamic Mode
+        requirements = st.text_area("Task Requirements", placeholder="List the requirements (one per line) that the content must satisfy", height=100)
+        requirements_list = [req.strip() for req in requirements.split('\n') if req.strip()]
+
         col1, col2 = st.columns(2)
-        
         with col1:
             prompt = st.text_area("Prompt Template", placeholder="The full prompt used to generate the content", height=150)
             sample_input = st.text_area("Generic Sample Input", placeholder="Example of the type of input that would be provided to the prompt (not tied to evaluation)", height=150)
-        
         with col2:
-            good_examples = st.text_area("Good Examples (one per line)", 
-                                       placeholder="Examples of good outputs", 
-                                       height=150)
-            bad_examples = st.text_area("Bad Examples (one per line)", 
-                                      placeholder="Examples of bad outputs", 
-                                      height=150)
-        
-        # Process good/bad examples into lists
+            good_examples = st.text_area("Good Examples (one per line)", placeholder="Examples of good outputs", height=150)
+            bad_examples = st.text_area("Bad Examples (one per line)", placeholder="Examples of bad outputs", height=150)
         good_examples_list = [ex.strip() for ex in good_examples.split('\n') if ex.strip()]
         bad_examples_list = [ex.strip() for ex in bad_examples.split('\n') if ex.strip()]
-        
+
+        # Generate metrics based on selected mode.
         if st.button("Generate Customized Metrics"):
             if not api_key:
-                st.error("Please provide an API key in the sidebar first")
+                st.error("Please provide an API key in the sidebar first.")
             elif not task_summary or not prompt:
-                st.error("Task summary and prompt are required")
+                st.error("Task summary and prompt are required.")
             else:
+                client = initialize_client(api_key)
+                model_used = st.session_state.model
                 with st.spinner("Processing..."):
-                    client = initialize_client(api_key)
-                    st.session_state.pipeline_results = run_pipeline(
-                        prompt=prompt,
-                        task_summary=task_summary,
-                        sample_input=sample_input,
-                        good_examples=good_examples_list,
-                        bad_examples=bad_examples_list,
-                        context=context,
-                        client=client,
-                        model=st.session_state.model
-                    )
-                    
-                    # Auto-save the new metrics if enabled
-                    if st.session_state.auto_save_enabled:
-                        save_metrics_to_session(st.session_state.pipeline_results)
-                        
+                    if st.session_state.eval_mode == "Library Mode":
+                        # Run existing library pipeline.
+                        st.session_state.pipeline_results = run_pipeline(
+                            prompt=prompt,
+                            task_summary=task_summary,
+                            sample_input=sample_input,
+                            good_examples=good_examples_list,
+                            bad_examples=bad_examples_list,
+                            context=context,
+                            client=client,
+                            model=model_used
+                        )
+                    else:
+                        # Run dynamic pipeline that generates HOW (style/format) and WHAT (content) metrics.
+                        st.session_state.pipeline_results = run_dynamic_pipeline(
+                            prompt=prompt,
+                            task_summary=task_summary,
+                            sample_input=sample_input,
+                            good_examples=good_examples_list,
+                            bad_examples=bad_examples_list,
+                            context=context,
+                            requirements=requirements_list,
+                            client=client,
+                            model=model_used
+                        )
                 st.success("Metrics customized successfully!")
         
         # 3. Add the Save/Load Metrics expander panel
@@ -3181,6 +3801,15 @@ def main():
             st.info("Please configure your task and generate metrics in the Input tab first.")
         else:
             st.header("Output Evaluation")
+
+            st.info("Using this tab, you can enter GenAI outputs and evaluate them with the metrics that you generated or uploaded in the 'Input Configuration' tab.")
+            
+            st.info("This tab is specifically for 'Single Evaluation'. This means we evaluate one input+output pair in isolation and give it an absolute score. ")
+                    
+            st.info("You can toggle between evaluating one input+output pair at a time, or you can upload a spreadsheet with many input+output pairs to use the 'Bulk Evaluation' feature.")
+                    
+                    
+                    
             
             # Add tabs for single vs bulk evaluation
             eval_tab1, eval_tab2 = st.tabs(["Single Evaluation", "Bulk Evaluation (CSV)"])
