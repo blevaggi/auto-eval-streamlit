@@ -85,24 +85,6 @@ def initialize_metrics_library():
             "examples": ["It is worrying if a small dog has eaten a lot of chocolate",
                         "Pregnancy in humans lasts 9 months"]
         },
-        # "Brand Voice": {
-        #     "description": "Check that output matches company's tone and style",
-        #      "evaluator_type":"llm",
-        #     "recommended_use_cases": ["marketing", "social media", "customer communications"],
-        #     "examples": [
-        #         "Language uses approved terminology",
-        #         "Tone matches brand personality guidelines"
-        #         ]
-        # },
-        # "Engagement": {
-        #     "description": "Check that content is likely to produce user interaction",
-        #      "evaluator_type":"llm",
-        #     "recommended_use_cases": ["social media", "email marketing", "website headlines"],
-        #     "examples": [
-        #         "Content poses thought-provoking questions",
-        #         "Content creates emotional connection"
-        #     ]
-        # },
         "Robustness": {
             "description": "Check that the chatbot adheres to its system prompt across multiple gambits",
              "evaluator_type":"llm",
@@ -888,61 +870,6 @@ def group_evaluation_results(evaluation_list):
     return grouped
 
 
-# def display_grouped_results(formatted_results, eval_results):
-#     """
-#     Displays evaluation results in a nested format by grouping 
-#     top-level metrics and sub-metrics.
-
-#     :param formatted_results: A dict keyed by metric strings like 
-#         "Format::overall" or "Style::style.tone".
-#         Each value is another dict with keys "score" and "justification".
-#     :param eval_results: The raw string output from your LLM evaluations, 
-#         keyed by the same metric strings.
-#     """
-#     # 1) Build a nested structure, grouping by top-level metric
-#     grouped_results = defaultdict(list)
-    
-#     for metric_key, data in formatted_results.items():
-#         # Parse out top-level metric vs. sub-metric
-#         if "::" in metric_key:
-#             top_metric, sub_metric = metric_key.split("::", 1)
-#         else:
-#             top_metric = metric_key
-#             sub_metric = None
-
-#         grouped_results[top_metric].append({
-#             "sub_metric": sub_metric,
-#             "score": data["score"],
-#             "justification": data["justification"],
-#             "raw_eval": eval_results[metric_key],  # Full LLM response
-#         })
-
-#     # 2) Display in a nested format
-#     for top_metric, entries in grouped_results.items():
-#         # Show the top-level metric name
-#         st.subheader(top_metric)
-
-#         # (Optional) Sort so that sub_metric == "overall" (or None) appears first
-#         entries.sort(key=lambda x: (
-#             # Put "overall" or None first, then alphabetical
-#             x["sub_metric"] is not None and "overall" not in x["sub_metric"], 
-#             x["sub_metric"] or ""
-#         ))
-
-#         for entry in entries:
-#             sub_label = entry["sub_metric"] if entry["sub_metric"] else "overall"
-#             expander_title = f"{top_metric}::{sub_label} (Score: {entry['score']})"
-#             with st.expander(expander_title):
-#                 st.markdown(f"**Score:** {entry['score']}")
-#                 st.markdown(f"**Justification:** {entry['justification']}")
-#                 st.markdown("**Raw Evaluation:**")
-#                 st.text_area(
-#                     label="",
-#                     value=entry["raw_eval"],
-#                     height=200,
-#                     disabled=True
-#                 )
-
 def display_grouped_results(formatted_results, eval_results):
     """
     Displays evaluation results in a nested format by grouping 
@@ -1010,102 +937,6 @@ def display_grouped_results(formatted_results, eval_results):
                     disabled=True
                 )
 
-
-# def display_grouped_pairwise_results(formatted_results, pairwise_results):
-#     """Display pairwise results grouped by metric category"""
-#     from collections import defaultdict
-    
-#     # Remove special keys
-#     display_results = {k: v for k, v in formatted_results.items() 
-#                       if k not in ["OVERALL", "CATEGORIES"]}
-    
-#     # Group by top-level metric
-#     grouped_results = defaultdict(list)
-#     for metric_key, data in display_results.items():
-#         if "::" in metric_key:
-#             top_metric, sub_metric = metric_key.split("::", 1)
-#         else:
-#             top_metric = metric_key
-#             sub_metric = None
-            
-#         grouped_results[top_metric].append({
-#             "sub_metric": sub_metric,
-#             "winner": data["winner"],
-#             "justification": data["justification"],
-#             "raw_eval": pairwise_results[metric_key]
-#         })
-    
-#     # Display category results
-#     category_results = formatted_results.get("CATEGORIES", {})
-    
-#     # Create visual summary of category winners
-#     categories = list(category_results.keys())
-#     if categories:
-#         st.subheader("Results by Category")
-        
-#         for category, result in category_results.items():
-#             winner = result["winner"]
-#             summary = result["summary"]
-            
-#             # Choose color based on winner
-#             color = "#4CAF50" if winner == "A" else "#2196F3" if winner == "B" else "#9E9E9E"  # Green for A, Blue for B, Gray for Tie
-            
-#             st.markdown(f"""
-#             <div style="
-#                 padding: 10px; 
-#                 border-left: 5px solid {color}; 
-#                 background-color: {color}10;
-#                 margin-bottom: 10px;
-#             ">
-#                 <h3>{category}: Output {winner} is better overall</h3>
-#                 <p>{summary}</p>
-#             </div>
-#             """, unsafe_allow_html=True)
-    
-#     # Display detailed results by category
-#     for top_metric, entries in grouped_results.items():
-#         st.subheader(f"{top_metric} Metrics")
-        
-#         # Sort entries so "overall" comes first
-#         entries.sort(key=lambda x: (
-#             0 if x["sub_metric"] is None or x["sub_metric"] == "overall" else 1,
-#             x["sub_metric"] or ""
-#         ))
-        
-#         for entry in entries:
-#             sub_label = entry["sub_metric"] if entry["sub_metric"] else "overall"
-#             winner = entry["winner"]
-            
-#             # Choose icon and color based on winner
-#             if "A is better" in winner:
-#                 icon = "🅰️"
-#                 color = "#4CAF50"  # Green
-#             elif "B is better" in winner:
-#                 icon = "🅱️"
-#                 color = "#2196F3"  # Blue
-#             else:  # Equivalent
-#                 icon = "🔄"
-#                 color = "#9E9E9E"  # Gray
-            
-#             expander_title = f"{icon} {top_metric}::{sub_label} - {winner}"
-            
-#             with st.expander(expander_title):
-#                 st.markdown(f"""
-#                 <div style="
-#                     padding: 10px; 
-#                     border-left: 5px solid {color}; 
-#                     background-color: {color}10;
-#                 ">
-#                     <h3>{winner}</h3>
-#                 </div>
-#                 """, unsafe_allow_html=True)
-                
-#                 st.markdown(f"**Justification:** {entry['justification']}")
-                
-#                 # Show raw evaluation 
-#                 show_raw = st.checkbox(f"Show Raw Evaluation", key=f"pairwise_raw_{top_metric}_{sub_label}")
-#                 if show_raw:
-#                     st.text_area("Raw Evaluation", entry["raw_eval"], height=200, disabled=True)
 
 def display_grouped_pairwise_results(formatted_results, pairwise_results):
     """Display pairwise results grouped by metric category with descriptive labels."""
@@ -1993,100 +1824,6 @@ def display_bulk_results(bulk_results, aggregates):
                 
                 st.altair_chart(avg_chart, use_container_width=True)
 
-# def display_bulk_results(bulk_results, aggregates):
-#     """
-#     Display results from bulk processing with visualizations
-    
-#     Args:
-#         bulk_results: List of evaluation results
-#         aggregates: Dict with aggregate statistics
-#     """
-#     import pandas as pd
-#     import altair as alt
-#     from collections import defaultdict
-    
-#     st.header("Bulk Evaluation Results")
-    
-#     # 1. Overall summary statistics
-#     st.subheader("Summary Statistics")
-    
-#     # Convert aggregates to a dataframe for display
-#     summary_data = []
-#     for metric, stats in aggregates.items():
-#         summary_data.append({
-#             "Metric": metric,
-#             "Mean Score": f"{stats['mean']:.2f}",
-#             "Median": f"{stats['median']:.2f}",
-#             "Min": f"{stats['min']:.2f}",
-#             "Max": f"{stats['max']:.2f}",
-#             "Std Dev": f"{stats['std']:.2f}",
-#             "Count": stats['count']
-#         })
-    
-#     if summary_data:
-#         summary_df = pd.DataFrame(summary_data)
-#         st.dataframe(summary_df, use_container_width=True)
-    
-#     # 2. Score distribution charts
-#     st.subheader("Score Distributions")
-    
-#     # Group metrics by category
-#     metrics_by_category = defaultdict(list)
-#     for metric in aggregates.keys():
-#         category = metric.split("::")[0] if "::" in metric else metric
-#         metrics_by_category[category].append(metric)
-    
-#     # Create distribution charts by category
-#     for category, metrics in metrics_by_category.items():
-#         with st.expander(f"{category} Metrics", expanded=True):
-#             # Prepare data for visualization
-#             all_scores = []
-            
-#             for result in bulk_results:
-#                 for metric in metrics:
-#                     if metric in result["evaluations"]:
-#                         try:
-#                             score = float(result["evaluations"][metric]["score"])
-#                             all_scores.append({
-#                                 "Metric": metric.split("::")[-1] if "::" in metric else metric,
-#                                 "Score": score
-#                             })
-#                         except (ValueError, TypeError):
-#                             pass
-            
-#             if all_scores:
-#                 df = pd.DataFrame(all_scores)
-                
-#                 # Create a histogram of scores
-#                 chart = alt.Chart(df).mark_bar().encode(
-#                     x=alt.X('Score:Q', bin=True, title='Score'),
-#                     y=alt.Y('count()', title='Count'),
-#                     color=alt.Color('Metric:N', legend=alt.Legend(orient='top')),
-#                     tooltip=['Metric', 'Score', 'count()']
-#                 ).properties(
-#                     width=600,
-#                     height=300,
-#                     title=f"{category} Score Distribution"
-#                 )
-                
-#                 st.altair_chart(chart, use_container_width=True)
-                
-#                 # Show average scores
-#                 avg_df = df.groupby('Metric')['Score'].mean().reset_index()
-#                 avg_df['Score'] = avg_df['Score'].round(2)
-                
-#                 avg_chart = alt.Chart(avg_df).mark_bar().encode(
-#                     x=alt.X('Score:Q', scale=alt.Scale(domain=[0, 2])),
-#                     y=alt.Y('Metric:N', sort='-x'),
-#                     color=alt.Color('Score:Q', scale=alt.Scale(domain=[0, 1, 2], range=['#f8696b', '#ffeb84', '#63be7b'])),
-#                     tooltip=['Metric', 'Score']
-#                 ).properties(
-#                     width=600, 
-#                     height=min(len(avg_df) * 40, 300),
-#                     title="Average Scores"
-#                 )
-                
-#                 st.altair_chart(avg_chart, use_container_width=True)
     
     # 3. Detailed results table with filtering
     st.subheader("Detailed Results")
@@ -3610,16 +3347,129 @@ def load_metrics_from_file():
 
     return None
 
+def add_prompt_zip_download_button(customized_metrics, prefix="evaluation_prompts"):
+    """
+    Creates a zip file containing individual text files for each evaluation metric
+    and adds a download button for the zip file
+    
+    Args:
+        customized_metrics: Dictionary of customized metrics
+        prefix: Prefix for the filename (default: "evaluation_prompts")
+    """
+    import datetime
+    import io
+    import zipfile
+    
+    # Create a timestamp for the filename
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Create a BytesIO object to store the zip file
+    zip_buffer = io.BytesIO()
+    
+    # Create a ZipFile object
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        # Generate prompt file for each metric
+        for metric_name, metric_data in customized_metrics.items():
+            # Clean up metric name for filename
+            clean_name = metric_name.replace("::", "_").replace(".", "_")
+            
+            # Create the prompt content
+            prompt = f"Think through each section of the following evaluation project and proceed when you are confident you understand each section.\n\n"
+            prompt += f"# Role:\nYou are an expert evaluator specialized in assessing outputs against specific criteria. Your task is to evaluate content based on the {metric_name} metric.\n\n"
+            
+            # Context section
+            prompt += "# Context:\n"
+            prompt += f"{metric_data.get('customized_description', '')}\n\n"
+            
+            # Task section
+            prompt += "# Task:\n"
+            prompt += f"Determine whether the output meets the criteria for the {metric_name} metric.\n\n"
+            
+            # Add rubric
+            prompt += "# Rubric:\n"
+            scoring_rubric = metric_data.get('scoring_rubric', {})
+            if isinstance(scoring_rubric, dict):
+                for score, description in scoring_rubric.items():
+                    prompt += f"- {score}: {description}\n"
+            else:
+                prompt += f"{scoring_rubric}\n\n"
+            
+            # Add success criteria
+            prompt += f"# Success Criteria:\n{metric_data.get('success_criteria', '')}\n\n"
+            
+            # Add parameters
+            prompt += f"# Parameters:\n{metric_data.get('parameters', '')}\n\n"
+            
+            # Add placeholders for the input and output
+            prompt += "# Input:\n{{Input}}\n\n"
+            prompt += "# Output to Evaluate:\n{{Output}}\n\n"
+            
+            # Add instructions for evaluation
+            prompt += "# Evaluation Instructions:\n"
+            prompt += f"Score this output on the {metric_name} metric using the rubric above.\n"
+            prompt += "Provide your score and detailed justification based solely on this metric.\n"
+            
+            # Write the file to the zip
+            zip_file.writestr(f"{clean_name}.txt", prompt)
+            
+            # Also add individual files for each sub-metric
+            if 'sub_metrics' in metric_data:
+                for sub_name, sub_details in metric_data['sub_metrics'].items():
+                    sub_clean_name = f"{clean_name}_{sub_name.replace('.', '_')}"
+                    
+                    # Create the sub-metric prompt
+                    sub_prompt = f"Think through each section of the following evaluation project and proceed when you are confident you understand each section.\n\n"
+                    sub_prompt += f"# Role:\nYou are an expert evaluator specialized in assessing outputs against specific criteria. Your task is to evaluate content based on the {metric_name}::{sub_name} sub-metric.\n\n"
+                    
+                    # Context section
+                    sub_prompt += "# Context:\n"
+                    sub_prompt += f"This is a sub-metric of {metric_name}. {metric_data.get('customized_description', '')}\n\n"
+                    
+                    # Task section
+                    sub_prompt += "# Task:\n"
+                    sub_prompt += f"Determine whether the output meets the criteria for the {sub_name} sub-metric.\n\n"
+                    
+                    # Add parameters
+                    sub_prompt += f"# Parameters:\n{sub_details.get('parameters', 'N/A')}\n\n"
+                    
+                    # Add success criteria
+                    sub_prompt += f"# Success Criteria:\n{sub_details.get('success_criteria', 'N/A')}\n\n"
+                    
+                    # Add rubric
+                    sub_prompt += "# Rubric:\n"
+                    sub_rubric = sub_details.get('scoring_rubric', {})
+                    if isinstance(sub_rubric, dict):
+                        for score, description in sub_rubric.items():
+                            sub_prompt += f"- {score}: {description}\n"
+                    else:
+                        sub_prompt += f"{sub_rubric}\n\n"
+                    
+                    # Add placeholders for the input and output
+                    sub_prompt += "# Input:\n{{Input}}\n\n"
+                    sub_prompt += "# Output to Evaluate:\n{{Output}}\n\n"
+                    
+                    # Add instructions for evaluation
+                    sub_prompt += "# Evaluation Instructions:\n"
+                    sub_prompt += f"Score this output on the {sub_name} sub-metric using the rubric above.\n"
+                    sub_prompt += "Provide your score and detailed justification based solely on this sub-metric.\n"
+                    
+                    # Write the sub-metric file to the zip
+                    zip_file.writestr(f"{sub_clean_name}.txt", sub_prompt)
+    
+    # Move the pointer to the beginning of the buffer
+    zip_buffer.seek(0)
+    
+    # Create the download button
+    filename = f"{prefix}_{timestamp}.zip"
+    st.download_button(
+        label="📝 Download Evaluation Prompts as ZIP",
+        data=zip_buffer,
+        file_name=filename,
+        mime="application/zip",
+    )
+
 
 def main():
-    # st.set_page_config(
-    #     page_title="Auto-Eval Selection & Evaluation Demo",
-    #     page_icon="📊",
-    #     layout="wide"
-    # )
-
-    
-
     # Initialize session state variables if not already set
     if "auto_save_enabled" not in st.session_state:
         st.session_state.auto_save_enabled = True
@@ -3655,7 +3505,7 @@ def main():
         eval_mode = st.radio(
             "Select Evaluation Mode",
             options=["Library Mode", "Dynamic Mode"],
-            index=0,
+            index=1,
             help="Library Mode uses a pre-supplied metrics library; Dynamic Mode generates metrics on the fly."
         )
         st.session_state.eval_mode = eval_mode  # Save mode in session state.
@@ -3737,6 +3587,12 @@ def main():
                 if st.session_state.pipeline_results:
                     json_data = save_metrics_to_session(st.session_state.pipeline_results)
                     download_metrics_button(json_data)
+                    
+                    # Add the prompts download button here
+                    st.markdown("---")
+                    st.subheader("Download Evaluation Prompts")
+                    add_prompt_zip_download_button(st.session_state.pipeline_results["customized_metrics"], 
+                                                prefix="evaluation_prompts")
                 else:
                     st.write("No metrics to save yet.")
             
