@@ -190,14 +190,14 @@ def get_pretty_metric_label(metric_key: str, customized_metrics: dict) -> str:
         return metric_key
 
 
-def generate_how_metrics(client, input_package: Dict, model: str) -> List[str]:
-    """Generate style and format based metrics (HOW metrics)"""
+def generate_how_metrics(client, input_package: Dict, model: str) -> List[Dict]:
+    """Generate style and format based metrics (aka PRESENTATION metrics) with complete evaluation components"""
     
-    system_message = """You are an AI evaluation metric system focused on identifying HOW metrics.
-    HOW metrics are style and format based metrics that evaluate the structure, presentation,
+    system_message = """You are an AI evaluation metric system focused on identifying Presentation metrics.
+    Presentation metrics are style and format based metrics that evaluate the structure, presentation,
     and mechanical aspects of content rather than the actual substance.
     
-    Examples of HOW metrics include:
+    Examples of Presentation metrics include:
     - Format compliance (word count, character limits, prohibited words)
     - Style adherence (tone, voice, brand guidelines)
     - Structural elements (layout, ordering of information)
@@ -206,11 +206,11 @@ def generate_how_metrics(client, input_package: Dict, model: str) -> List[str]:
     When analyzing a task, focus exclusively on these mechanical aspects, not the substantive content.
     """
     
-    with st.spinner("Generating HOW metrics (style and format)..."):
+    with st.spinner("Generating PRESENTATION metrics (style and format)..."):
         # FLOW 1 Step 1: Generate initial HOW metrics list
         prompt_1 = f"""
-        Look at the input package below. There is a key difference between WHAT and HOW metrics. 
-        What are all the HOW -- style and format based metrics we should apply to this use case? 
+        Look at the input package below. There is a key difference between CONTENT and PRESENTATION metrics. 
+        What are all the PRESENTATION metrics -- style and format based metrics we should apply to this use case? 
         
         INPUT PACKAGE:
         Task Summary: {input_package['task_summary']}
@@ -221,8 +221,8 @@ def generate_how_metrics(client, input_package: Dict, model: str) -> List[str]:
         Good Examples: {input_package['good_examples']}
         Bad Examples: {input_package['bad_examples']}
         
-        Return a numbered list of HOW metrics that focus solely on style and formatting aspects.
-        Each item should be 1-2 sentences maximum.
+        Return a numbered list of PRESENTATION metrics that focus solely on style and formatting aspects.
+        For each metric include a pithy metric name and a brief description of 1-2 sentences maximum.
         """
 
         response_1 = client.chat.completions.create(
@@ -236,21 +236,23 @@ def generate_how_metrics(client, input_package: Dict, model: str) -> List[str]:
         initial_how_metrics = response_1.choices[0].message.content
         
         # Display intermediate results
-        with st.expander("Initial HOW Metrics (Style & Format)"):
+        with st.expander("Initial PRESENTATION Metrics (Style & Format)"):
             st.write(initial_how_metrics)
         
         # FLOW 1 Step 2: Refine metrics to be more specific and discrete
         prompt_2 = f"""
         Now edit the list below to be as specific and discrete as possible. 
-        Remove anything that is actually a WHAT-aka-Content metric.
+        Remove anything that is actually a Content metric.
         Break general metrics into more specific sub-metrics.
         For example, instead of "Format compliance", specify "Character count limit" and "Prohibited words check" as separate items.
+
+        We want the MOST ATOMIC version of each metric. 
         
         CURRENT LIST:
         {initial_how_metrics}
         
         Return a new numbered list with more specific and granular metrics.
-        Each item should be 1-2 sentences maximum.
+        For each metric include a pithy metric name and a brief description of 1-2 sentences maximum.
         """
 
         response_2 = client.chat.completions.create(
@@ -266,7 +268,7 @@ def generate_how_metrics(client, input_package: Dict, model: str) -> List[str]:
         refined_how_metrics = response_2.choices[0].message.content
         
         # Display intermediate results
-        with st.expander("Refined HOW Metrics"):
+        with st.expander("Refined Presentation Metrics"):
             st.write(refined_how_metrics)
         
         # FLOW 1 Step 3: Remove redundancies
@@ -278,8 +280,8 @@ def generate_how_metrics(client, input_package: Dict, model: str) -> List[str]:
         {refined_how_metrics}
         
         Return a revised, shorter list with only unique, non-overlapping metrics.
-        While you're at it -- Remove anything that is actually a WHAT-aka-Content metric.
-        Each item should be 1-2 sentences maximum.
+        While you're at it -- Remove anything that is actually a Content metric.
+        For each metric include a pithy metric name and a brief description of 1-2 sentences maximum.
         """
 
         response_3 = client.chat.completions.create(
@@ -297,28 +299,57 @@ def generate_how_metrics(client, input_package: Dict, model: str) -> List[str]:
         final_how_metrics = response_3.choices[0].message.content
         
         # Display final results
-        with st.expander("Final HOW Metrics (Redundancies Removed)"):
+        with st.expander("Final PRESENTATION Metrics (Redundancies Removed)"):
             st.write(final_how_metrics)
             
         # Extract metrics as a list
         metrics_list = []
         for line in final_how_metrics.split('\n'):
             if re.match(r'^\d+[\.\)]\s+', line.strip()):
-                # Remove number prefix and add to list
+                # Remove number prefix and extract the metric description
                 clean_line = re.sub(r'^\d+[\.\)]\s+', '', line.strip())
                 if clean_line:
-                    metrics_list.append(clean_line)
+                    # Generate complete evaluation components for this metric
+                    enhancement_prompt = f"""
+                    For the following PRESENTATION metric: "{clean_line}"
+                    
+                    Generate complete evaluation components including parameters, success criteria, and a 3-point scoring rubric (0, 0.5, 1.0 scale).
+                    
+                    Return your response as a JSON object with these keys:
+                    1. "customized_description": the original metric description
+                    2. "parameters": specific aspects to evaluate for this metric
+                    3. "success_criteria": what constitutes success for this metric
+                    4. "scoring_rubric": a rubric with scores 0.0, 0.5, and 1.0 with descriptions for each score level
+                    
+                    TASK CONTEXT:
+                    {input_package['task_summary']}
+                    {input_package['context']}
+                    """
+                    
+                    response = client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": system_message},
+                            {"role": "user", "content": enhancement_prompt}
+                        ],
+                        response_format={"type": "json_object"}
+                    )
+                    
+                    # Parse the enhanced metric details
+                    enhanced_metric = json.loads(response.choices[0].message.content)
+                    enhanced_metric["customized_description"] = clean_line  # Ensure original description is preserved
+                    metrics_list.append(enhanced_metric)
         
         return metrics_list
 
-def generate_what_metrics(client, input_package: Dict, model: str) -> List[str]:
-    """Generate content-based metrics (WHAT metrics)"""
+def generate_what_metrics(client, input_package: Dict, model: str) -> List[Dict]:
+    """Generate content-based metrics (WHAT metrics) with complete evaluation components"""
     
-    system_message = """You are an AI evaluation metric system focused on identifying WHAT metrics.
-    WHAT metrics are content-based metrics that evaluate the substance, information, and meaning
+    system_message = """You are an AI evaluation metric system focused on identifying Content-based metrics.
+    Content-based metrics are metrics that evaluate the substance, information, and meaning
     of the content rather than how it's presented.
     
-    Examples of WHAT metrics include:
+    Examples of Content-based metrics include:
     - Relevance (appropriate to context and user needs)
     - Accuracy (factual correctness)
     - Coherence (logical flow and consistency)
@@ -328,11 +359,11 @@ def generate_what_metrics(client, input_package: Dict, model: str) -> List[str]:
     When analyzing a task, focus exclusively on these substantive aspects, not the mechanical presentation.
     """
     
-    with st.spinner("Generating WHAT metrics (content)..."):
+    with st.spinner("Generating Content-based metrics..."):
         # FLOW 2 Step 1: Generate initial WHAT metrics list
         prompt_1 = f"""
-        Look at the input package below. There is a key difference between WHAT and HOW metrics. 
-        What are all the WHAT -- content-based metrics we should apply to this use case? 
+        Look at the input package below. There is a key difference between Content-based and Presentation metrics. 
+        What are all the Content-based metrics we should apply to this use case? 
         
         INPUT PACKAGE:
         Task Summary: {input_package['task_summary']}
@@ -343,8 +374,8 @@ def generate_what_metrics(client, input_package: Dict, model: str) -> List[str]:
         Good Examples: {input_package['good_examples']}
         Bad Examples: {input_package['bad_examples']}
         
-        Return a numbered list of WHAT metrics that focus solely on content-based aspects.
-        Each item should be 1-2 sentences maximum.
+        Return a numbered list of Content-based metrics that focus solely on the substance of what the LLM output is saying.
+        For each metric include a pithy metric name and a brief description of 1-2 sentences maximum.
         """
 
         response_1 = client.chat.completions.create(
@@ -358,20 +389,21 @@ def generate_what_metrics(client, input_package: Dict, model: str) -> List[str]:
         initial_what_metrics = response_1.choices[0].message.content
         
         # Display intermediate results
-        with st.expander("Initial WHAT Metrics (Content)"):
+        with st.expander("Initial Content-based Metrics:"):
             st.write(initial_what_metrics)
         
         # FLOW 2 Step 2: Refine metrics to be more specific and discrete
         prompt_2 = f"""
         Now edit the list below to be as specific and discrete as possible. 
         Break general metrics into more specific sub-metrics.
-        For example, instead of "Relevance", specify "Product relevance" and "User query relevance" as separate items.
+        
+        We want to be as ATOMIC as possible. 
         
         CURRENT LIST:
         {initial_what_metrics}
         
         Return a new numbered list with more specific and granular metrics.
-        Each item should be 1-2 sentences maximum.
+        For each metric include a pithy metric name and a brief description of 1-2 sentences maximum.
         """
 
         response_2 = client.chat.completions.create(
@@ -387,19 +419,19 @@ def generate_what_metrics(client, input_package: Dict, model: str) -> List[str]:
         refined_what_metrics = response_2.choices[0].message.content
         
         # Display intermediate results
-        with st.expander("Refined WHAT Metrics"):
+        with st.expander("Refined Content-based Metrics"):
             st.write(refined_what_metrics)
         
         # FLOW 2 Step 3: Remove redundancies
         prompt_3 = f"""
-        Look at this list of metrics. Remove any redundancies from the list. 
+        Look at this list of Content-based metrics. Remove any redundancies from the list. 
         Any metrics that overlap and are overly similar will be harmful because they will double-reward and double-penalize in the results.
         
         CURRENT LIST:
         {refined_what_metrics}
         
-        Return a revised, shorter list with only unique, non-overlapping metrics.
-        Each item should be 1-2 sentences maximum.
+        Return a revised, shorter list with only unique, non-overlapping Content-based metrics.
+        For each metric include a pithy metric name and a brief description of 1-2 sentences maximum.
         """
 
         response_3 = client.chat.completions.create(
@@ -417,17 +449,46 @@ def generate_what_metrics(client, input_package: Dict, model: str) -> List[str]:
         final_what_metrics = response_3.choices[0].message.content
         
         # Display final results
-        with st.expander("Final WHAT Metrics (Redundancies Removed)"):
+        with st.expander("Final Content-based Metrics (Redundancies Removed)"):
             st.write(final_what_metrics)
             
         # Extract metrics as a list
         metrics_list = []
         for line in final_what_metrics.split('\n'):
             if re.match(r'^\d+[\.\)]\s+', line.strip()):
-                # Remove number prefix and add to list
+                # Remove number prefix and extract the metric description
                 clean_line = re.sub(r'^\d+[\.\)]\s+', '', line.strip())
                 if clean_line:
-                    metrics_list.append(clean_line)
+                    # Generate complete evaluation components for this metric
+                    enhancement_prompt = f"""
+                    For the following WHAT metric: "{clean_line}"
+                    
+                    Generate complete evaluation components including parameters, success criteria, and a 3-point scoring rubric (0, 0.5, 1.0 scale).
+                    
+                    Return your response as a JSON object with these keys:
+                    1. "customized_description": the original metric description
+                    2. "parameters": specific aspects to evaluate for this metric
+                    3. "success_criteria": what constitutes success for this metric
+                    4. "scoring_rubric": a rubric with scores 0, 0.5, and 1.0 with descriptions for each score level
+                    
+                    TASK CONTEXT:
+                    {input_package['task_summary']}
+                    {input_package['context']}
+                    """
+                    
+                    response = client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": system_message},
+                            {"role": "user", "content": enhancement_prompt}
+                        ],
+                        response_format={"type": "json_object"}
+                    )
+                    
+                    # Parse the enhanced metric details
+                    enhanced_metric = json.loads(response.choices[0].message.content)
+                    enhanced_metric["customized_description"] = clean_line  # Ensure original description is preserved
+                    metrics_list.append(enhanced_metric)
         
         return metrics_list
 
@@ -456,30 +517,30 @@ def run_dynamic_pipeline(prompt: str, task_summary: str, sample_input: str,
     what_metrics = generate_what_metrics(client, input_package, model)
 
     # Map these lists into a dictionary that mimics the library structure.
-    # For example, create metric keys for each dynamic metric.
     selected_metrics = []
     customized_metrics = {}
 
     for idx, metric in enumerate(how_metrics, 1):
         metric_key = f"HOW_{idx}"
         selected_metrics.append(metric_key)
-        # You could add further customization if needed.
+        # Now add the complete metric with all components
         customized_metrics[metric_key] = {
-            "customized_description": metric,
-            "parameters": "N/A",
-            "success_criteria": "N/A",
-            "scoring_rubric": "N/A",
-            "examples": []  # Optionally, add examples if you wish.
+            "customized_description": metric["customized_description"],
+            "parameters": metric["parameters"],
+            "success_criteria": metric["success_criteria"],
+            "scoring_rubric": metric["scoring_rubric"],
+            "examples": metric.get("examples", [])
         }
+        
     for idx, metric in enumerate(what_metrics, 1):
         metric_key = f"WHAT_{idx}"
         selected_metrics.append(metric_key)
         customized_metrics[metric_key] = {
-            "customized_description": metric,
-            "parameters": "N/A",
-            "success_criteria": "N/A",
-            "scoring_rubric": "N/A",
-            "examples": []
+            "customized_description": metric["customized_description"],
+            "parameters": metric["parameters"],
+            "success_criteria": metric["success_criteria"],
+            "scoring_rubric": metric["scoring_rubric"],
+            "examples": metric.get("examples", [])
         }
 
     # Return a unified dictionary with the same keys as Library Mode.
