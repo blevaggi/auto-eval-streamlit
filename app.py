@@ -189,6 +189,64 @@ def get_pretty_metric_label(metric_key: str, customized_metrics: dict) -> str:
     except (KeyError, TypeError):
         return metric_key
 
+def detect_conversation_type(client, input_package: Dict, model: str) -> Dict:
+    """
+    Determine if this is a multi-turn conversation use case and set the appropriate 
+    evaluation structure
+    """
+    system_message = """You are an AI evaluation analyzer focused on determining the nature of AI tasks.
+    Your job is to identify whether a given task involves multi-turn conversation (like chatbots, 
+    conversation agents, or dialogue systems) or single-turn input/output (like content generation, 
+    classification, or summarization).
+    
+    Multi-turn conversations involve:
+    - Back-and-forth exchanges between user and AI
+    - Context building over multiple turns
+    - Conversational continuity and flow
+    - Often used for chatbots, virtual assistants, etc.
+    
+    Single-turn tasks involve:
+    - One input leading to one output
+    - No contextual memory between interactions
+    - Self-contained generation tasks
+    - Often used for content creation, transformation, or analysis
+    """
+    
+    with st.spinner("Analyzing if this is a multi-turn conversation task..."):
+        analysis_prompt = f"""
+        Analyze the given task description and prompt to determine if this is a multi-turn conversation or a single-turn input/output task.
+        
+        TASK SUMMARY: {input_package['task_summary']}
+        PROMPT: {input_package['prompt']}
+        CONTEXT: {input_package['context']}
+        SAMPLE INPUT: {input_package['sample_input']}
+        
+        Based on this information, analyze whether this is:
+        1. A multi-turn conversation task (like a chatbot or dialogue system)
+        2. A single-turn input/output task (like content generation or transformation)
+        
+        Return your analysis as a JSON object with these keys:
+        - "is_conversation": boolean (true if this is a multi-turn conversation task)
+        - "reasoning": brief explanation of your determination
+        - "evaluation_structure": either "conversation" or "input_output"
+        """
+        
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": analysis_prompt}
+            ],
+            response_format={"type": "json_object"}
+        )
+        
+        analysis = json.loads(response.choices[0].message.content)
+        
+        # Display results
+        st.write("Task Type Analysis:")
+        st.json(analysis)
+        
+        return analysis
 
 def generate_how_metrics(client, input_package: Dict, model: str) -> List[Dict]:
     """Generate style and format based metrics (aka PRESENTATION metrics) with complete evaluation components"""
@@ -509,10 +567,14 @@ def run_dynamic_pipeline(prompt: str, task_summary: str, sample_input: str,
         "good_examples": good_examples,
         "bad_examples": bad_examples,
         "context": context,
-        "requirements": requirements  # New field for dynamic mode
+        "requirements": requirements
     }
 
-    # Generate style/format (HOW) metrics and content-based (WHAT) metrics.
+    # First, detect if this is a conversation task
+    conversation_analysis = detect_conversation_type(client, input_package, model)
+    is_conversation = conversation_analysis.get("is_conversation", False)
+
+    # Generate style/format (HOW) metrics and content-based (WHAT) metrics
     how_metrics = generate_how_metrics(client, input_package, model)
     what_metrics = generate_what_metrics(client, input_package, model)
 
@@ -521,7 +583,7 @@ def run_dynamic_pipeline(prompt: str, task_summary: str, sample_input: str,
     customized_metrics = {}
 
     for idx, metric in enumerate(how_metrics, 1):
-        metric_key = f"HOW_{idx}"
+        metric_key = f"Presentation_Metric_{idx}"
         selected_metrics.append(metric_key)
         # Now add the complete metric with all components
         customized_metrics[metric_key] = {
@@ -533,7 +595,7 @@ def run_dynamic_pipeline(prompt: str, task_summary: str, sample_input: str,
         }
         
     for idx, metric in enumerate(what_metrics, 1):
-        metric_key = f"WHAT_{idx}"
+        metric_key = f"Content_Metric_{idx}"
         selected_metrics.append(metric_key)
         customized_metrics[metric_key] = {
             "customized_description": metric["customized_description"],
@@ -543,13 +605,14 @@ def run_dynamic_pipeline(prompt: str, task_summary: str, sample_input: str,
             "examples": metric.get("examples", [])
         }
 
-    # Return a unified dictionary with the same keys as Library Mode.
+    # Return a unified dictionary with the same keys as Library Mode plus conversation flag
     return {
         "input": input_package,
         "selected_metrics": selected_metrics,
-        "customized_metrics": customized_metrics
+        "customized_metrics": customized_metrics,
+        "is_conversation": is_conversation,  # Add conversation flag
+        "conversation_analysis": conversation_analysis  # Include full analysis
     }
-
 
 def retrieve_relevant_metrics(client, input_package: Dict, model: str) -> Dict:
     """Use LLM to define relevant metrics based on the input context"""
@@ -2007,47 +2070,60 @@ def display_bulk_results(bulk_results, aggregates):
                     if show_raw:
                         st.text_area("Raw Evaluation", entry["raw_eval"], height=200, disabled=True)
 
-def parse_uploaded_csv(uploaded_file, input_column, output_column):
+def parse_uploaded_csv(uploaded_file, input_column, output_column=None, is_conversation=False):
     """
-    Parse uploaded CSV file and extract input-output pairs
+    Parse uploaded CSV file for either input-output pairs or full conversations
     
     Args:
         uploaded_file: Streamlit uploaded file object
-        input_column: Name of the column containing inputs
-        output_column: Name of the column containing outputs
+        input_column: Name of the column containing inputs (or conversations in conversation mode)
+        output_column: Name of the column containing outputs (not used in conversation mode)
+        is_conversation: Whether this is a conversation evaluation
         
     Returns:
         List of dicts with 'input' and 'output' keys
     """
     import pandas as pd
-    import io
     
     # Read CSV
     try:
-        # Try to detect encoding automatically
         df = pd.read_csv(uploaded_file)
     except UnicodeDecodeError:
-        # If auto-detection fails, try with different encodings
         uploaded_file.seek(0)
         df = pd.read_csv(uploaded_file, encoding='latin1')
     
     # Validate columns
     if input_column not in df.columns:
         raise ValueError(f"Input column '{input_column}' not found in CSV")
-    if output_column not in df.columns:
+    if not is_conversation and output_column not in df.columns:
         raise ValueError(f"Output column '{output_column}' not found in CSV")
     
-    # Extract input-output pairs
     pairs = []
-    for _, row in df.iterrows():
-        # Skip rows with missing values
-        if pd.isna(row[input_column]) or pd.isna(row[output_column]):
-            continue
+    
+    if is_conversation:
+        # For conversation mode, we use only one column that contains the entire conversation
+        for i, row in df.iterrows():
+            if pd.isna(row[input_column]):
+                continue
             
-        pairs.append({
-            "input": str(row[input_column]),
-            "output": str(row[output_column])
-        })
+            conversation = str(row[input_column])
+            
+            # In conversation mode, use the same text as both input and output
+            # This ensures compatibility with the rest of the evaluation pipeline
+            pairs.append({
+                "input": conversation,  # Use conversation as input
+                "output": conversation  # Use same conversation as output for evaluation
+            })
+    else:
+        # Original single input/output handling
+        for _, row in df.iterrows():
+            if pd.isna(row[input_column]) or pd.isna(row[output_column]):
+                continue
+                
+            pairs.append({
+                "input": str(row[input_column]),
+                "output": str(row[output_column])
+            })
     
     return pairs
 
@@ -3754,20 +3830,37 @@ def main():
             }
             
             with eval_tab1:
-                # Single evaluation input section
-                specific_input = st.text_area(
-                    "Specific Input for This Evaluation", 
-                    height=100,
-                    placeholder="Enter the specific input",
-                    key="tab3_single_eval_input"
-                )
+                # Check if this is a conversation task
+                is_conversation = st.session_state.pipeline_results.get("is_conversation", False)
+                
+                if is_conversation:
+                    st.info("This task has been identified as a multi-turn conversation. Please input the entire conversation for evaluation rather than a single input/output pair.")
+                    
+                    specific_conversation = st.text_area(
+                        "Entire Conversation for Evaluation", 
+                        height=300,
+                        placeholder="Enter the full conversation transcript",
+                        key="tab3_single_eval_conversation"
+                    )
+                    
+                    # Use conversation as both input (for consistency) and output (for evaluation)
+                    specific_input = specific_conversation
+                    output = specific_conversation
+                else:
+                    # Original single input/output fields
+                    specific_input = st.text_area(
+                        "Specific Input for This Evaluation", 
+                        height=100,
+                        placeholder="Enter the specific input",
+                        key="tab3_single_eval_input"
+                    )
 
-                output = st.text_area(
-                    "Specific Output for This Evaluation", 
-                    height=100,
-                    placeholder="Enter the specific output",
-                    key="tab3_single_eval_output"
-                )
+                    output = st.text_area(
+                        "Specific Output for This Evaluation", 
+                        height=100,
+                        placeholder="Enter the specific output",
+                        key="tab3_single_eval_output"
+                    )
                 
                 # Run single evaluation button
                 run_single_eval = st.button("Run Single Evaluation", key="tab3_single_eval_run")
@@ -3881,41 +3974,37 @@ def main():
                         column_names = df.columns.tolist()
                         st.write(f"Available columns: {column_names}")
                         
-                        col1, col2 = st.columns(2)
+                        # Check if this is a conversation task
+                        is_conversation = st.session_state.pipeline_results.get("is_conversation", False)
                         
-                        with col1:
-                            input_column = st.selectbox(
-                                "Select input column",
+                        # Display appropriate column selection UI based on evaluation type
+                        if is_conversation:
+                            st.info("This task has been identified as a **multi-turn conversation**. For conversation evaluation, upload a CSV with a column containing complete conversation transcripts.")
+                            
+                            # For conversation, we only need one column selection
+                            conversation_column = st.selectbox(
+                                "Select conversation transcript column",
                                 options=column_names,
                                 index=0 if column_names else None,
-                                key="tab3_input_column"
+                                key="tab3_conversation_column"
                             )
-                        
-                        with col2:
-                            output_column = st.selectbox(
-                                "Select output column",
-                                options=column_names,
-                                index=1 if len(column_names) > 1 else None,
-                                key="tab3_output_column"
-                            )
-                        
-                        # Sample data preview
-                        if input_column and output_column:
-                            st.write("Sample input-output pairs:")
-                            sample_pairs = []
                             
-                            # Handle potential missing values safely
-                            for _, row in df.head(3).iterrows():
-                                if not pd.isna(row.get(input_column, None)) and not pd.isna(row.get(output_column, None)):
-                                    sample_pairs.append({
-                                        "input": str(row[input_column]),
-                                        "output": str(row[output_column])
-                                    })
-                            
-                            for i, pair in enumerate(sample_pairs):
-                                with st.expander(f"Pair {i+1}", expanded=i==0):
-                                    st.text_area(f"Input {i+1}", pair["input"], height=100, key=f"tab3_preview_input_{i}", disabled=True)
-                                    st.text_area(f"Output {i+1}", pair["output"], height=100, key=f"tab3_preview_output_{i}", disabled=True)
+                            # Sample data preview for conversations
+                            if conversation_column:
+                                st.write("Sample conversations:")
+                                
+                                # Show a few sample conversations
+                                for i, row in df.head(3).iterrows():
+                                    if not pd.isna(row.get(conversation_column, None)):
+                                        conversation = str(row[conversation_column])
+                                        with st.expander(f"Conversation {i+1}", expanded=i==0):
+                                            st.text_area(
+                                                f"Full Conversation {i+1}", 
+                                                conversation, 
+                                                height=300, 
+                                                key=f"tab3_preview_conv_{i}",
+                                                disabled=True
+                                            )
                             
                             # Bulk processing options
                             max_items = st.slider(
@@ -3923,12 +4012,12 @@ def main():
                                 min_value=1, 
                                 max_value=min(500, len(df)), 
                                 value=min(20, len(df)),
-                                key="tab3_max_items",
-                                help="Limit rows to process to avoid excessive API usage"
+                                key="tab3_max_items_conv",
+                                help="Limit conversations to process to avoid excessive API usage"
                             )
                             
-                            # Process button
-                            if st.button("Run Bulk Evaluation", key="tab3_run_bulk"):
+                            # Process button for conversations
+                            if st.button("Run Bulk Evaluation", key="tab3_run_bulk_conv"):
                                 if not any(selected_eval_metrics.values()):
                                     st.error("Please select at least one metric for evaluation.")
                                 else:
@@ -3936,16 +4025,20 @@ def main():
                                         # Reset file pointer again before parsing
                                         uploaded_file.seek(0)
                                         
-                                        # Parse and process CSV
-                                        input_output_pairs = parse_uploaded_csv(uploaded_file, input_column, output_column)
+                                        # Parse and process CSV with conversation mode
+                                        input_output_pairs = parse_uploaded_csv(
+                                            uploaded_file, 
+                                            input_column=conversation_column,
+                                            is_conversation=True
+                                        )
                                         
                                         if not input_output_pairs:
-                                            st.error("No valid input-output pairs found in CSV.")
+                                            st.error("No valid conversations found in CSV.")
                                             st.stop()
                                         
                                         # Limit to max_items
                                         input_output_pairs = input_output_pairs[:max_items]
-                                        st.write(f"Processing {len(input_output_pairs)} items...")
+                                        st.write(f"Processing {len(input_output_pairs)} conversations...")
                                         
                                         # Progress tracking
                                         progress_bar = st.progress(0, text="Starting evaluation...")
@@ -3973,14 +4066,120 @@ def main():
                                         add_download_button(
                                             bulk_results=bulk_results,
                                             original_df=df,
-                                            input_column=input_column,
-                                            output_column=output_column,
+                                            input_column=conversation_column,
                                             is_pairwise=False
                                         )
                                     
                                     except Exception as e:
                                         st.error(f"Error processing CSV: {str(e)}")
                                         st.exception(e)  # This shows the full traceback
+                        else:
+                            # Original input/output column selection for non-conversation mode
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                input_column = st.selectbox(
+                                    "Select input column",
+                                    options=column_names,
+                                    index=0 if column_names else None,
+                                    key="tab3_input_column"
+                                )
+                            
+                            with col2:
+                                output_column = st.selectbox(
+                                    "Select output column",
+                                    options=column_names,
+                                    index=1 if len(column_names) > 1 else None,
+                                    key="tab3_output_column"
+                                )
+                            
+                            # Sample data preview for input/output pairs
+                            if input_column and output_column:
+                                st.write("Sample input-output pairs:")
+                                sample_pairs = []
+                                
+                                # Handle potential missing values safely
+                                for _, row in df.head(3).iterrows():
+                                    if not pd.isna(row.get(input_column, None)) and not pd.isna(row.get(output_column, None)):
+                                        sample_pairs.append({
+                                            "input": str(row[input_column]),
+                                            "output": str(row[output_column])
+                                        })
+                                
+                                for i, pair in enumerate(sample_pairs):
+                                    with st.expander(f"Pair {i+1}", expanded=i==0):
+                                        st.text_area(f"Input {i+1}", pair["input"], height=100, key=f"tab3_preview_input_{i}", disabled=True)
+                                        st.text_area(f"Output {i+1}", pair["output"], height=100, key=f"tab3_preview_output_{i}", disabled=True)
+                                
+                                # Bulk processing options
+                                max_items = st.slider(
+                                    "Maximum number of items to process", 
+                                    min_value=1, 
+                                    max_value=min(500, len(df)), 
+                                    value=min(20, len(df)),
+                                    key="tab3_max_items",
+                                    help="Limit rows to process to avoid excessive API usage"
+                                )
+                                
+                                # Process button for input/output pairs
+                                if st.button("Run Bulk Evaluation", key="tab3_run_bulk"):
+                                    if not any(selected_eval_metrics.values()):
+                                        st.error("Please select at least one metric for evaluation.")
+                                    else:
+                                        try:
+                                            # Reset file pointer again before parsing
+                                            uploaded_file.seek(0)
+                                            
+                                            # Parse and process CSV for standard input/output pairs
+                                            input_output_pairs = parse_uploaded_csv(
+                                                uploaded_file, 
+                                                input_column, 
+                                                output_column,
+                                                is_conversation=False
+                                            )
+                                            
+                                            if not input_output_pairs:
+                                                st.error("No valid input-output pairs found in CSV.")
+                                                st.stop()
+                                            
+                                            # Limit to max_items
+                                            input_output_pairs = input_output_pairs[:max_items]
+                                            st.write(f"Processing {len(input_output_pairs)} items...")
+                                            
+                                            # Progress tracking
+                                            progress_bar = st.progress(0, text="Starting evaluation...")
+                                            
+                                            # Run bulk evaluation
+                                            client = initialize_client(api_key)
+                                            filtered_result = st.session_state.pipeline_results.copy()
+                                            
+                                            bulk_results = bulk_process_evaluations_parallel(
+                                                client=client,
+                                                result=filtered_result,
+                                                input_output_pairs=input_output_pairs,
+                                                eval_model=eval_model,
+                                                selected_metrics=selected_eval_metrics,
+                                                progress_bar=progress_bar,
+                                                max_workers=max_workers
+                                            )
+                                            
+                                            # Calculate and display results
+                                            aggregates = calculate_aggregate_metrics(bulk_results)
+                                            display_bulk_results(bulk_results, aggregates)
+                                            
+                                            # Download functionality
+                                            st.subheader("Download Results")
+                                            add_download_button(
+                                                bulk_results=bulk_results,
+                                                original_df=df,
+                                                input_column=input_column,
+                                                output_column=output_column,
+                                                is_pairwise=False
+                                            )
+                                        
+                                        except Exception as e:
+                                            st.error(f"Error processing CSV: {str(e)}")
+                                            st.exception(e)  # This shows the full traceback
                     
                     except Exception as e:
                         st.error(f"Error reading CSV file: {str(e)}")
