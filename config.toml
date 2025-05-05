@@ -1,0 +1,2 @@
+[server]
+maxSessionIdleTime = 14500
