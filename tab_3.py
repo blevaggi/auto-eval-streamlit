@@ -144,8 +144,10 @@ def calculate_average_scores(results, prompt_keys):
                                     if isinstance(v, (int, float)):
                                         scores.append(float(v))
                                         break
-                    except:
-                        pass
+                    except Exception as e:
+                        st.warning(f"Error parsing score for {prompt_key}: {e}")
+                        # Continue processing other results
+                        continue
             
             if scores:
                 averages[output_col][prompt_key] = sum(scores) / len(scores)
@@ -239,86 +241,94 @@ def create_comparison_chart(avg_scores, prompt_keys, output_cols):
     """
     Create a comparison chart using Plotly
     """
-    # Create a figure for each metric
-    figs = []
+    # Add debug logging
+    st.write("Debug - avg_scores structure:", avg_scores)
+    st.write("Debug - prompt_keys:", prompt_keys)
+    st.write("Debug - output_cols:", output_cols)
     
-    for prompt_key in prompt_keys:
-        # Extract scores for this metric across all models
-        scores = []
-        for output_col in output_cols:
-            if output_col in avg_scores and prompt_key in avg_scores[output_col]:
-                score = avg_scores[output_col][prompt_key]
-                if score is not None:
-                    scores.append(score)
-                else:
-                    scores.append(0)
-            else:
-                scores.append(0)
-        
-        # Create bar chart for this metric
-        fig = go.Figure(data=[
-            go.Bar(
-                x=scores,
-                y=output_cols,
-                orientation='h',
-                text=[f"{score:.2f}" if score > 0 else "N/A" for score in scores],
-                textposition='outside',
-                marker_color=['#ff9999', '#66b3ff', '#99ff99', '#ffcc99', '#c2c2f0'][:len(output_cols)]
-            )
-        ])
-        
-        # Update layout
+    # Check if we have any scores to display
+    has_scores = False
+    for output_col in output_cols:
+        if output_col in avg_scores:
+            for prompt_key in prompt_keys:
+                if prompt_key in avg_scores[output_col] and avg_scores[output_col][prompt_key] is not None:
+                    has_scores = True
+                    break
+            if has_scores:
+                break
+    
+    if not has_scores:
+        # Create an empty figure with a message
+        fig = go.Figure()
         fig.update_layout(
-            title=f"Average Score for {prompt_key}",
-            xaxis_title="Score",
-            yaxis_title="Output Column",
-            height=300 + (50 * len(output_cols)),  # Adjust height based on number of models
-            margin=dict(l=20, r=120, t=50, b=20),
-            xaxis=dict(range=[0, 5])  # Assuming scores are on a 0-5 scale
+            title="No scores available for visualization",
+            annotations=[dict(
+                text="No numeric scores were found in the evaluation results. Check that your evaluation prompts return a score value.",
+                showarrow=False,
+                xref="paper",
+                yref="paper",
+                x=0.5,
+                y=0.5
+            )]
         )
-        
-        figs.append(fig)
+        return fig
     
     # Combine all figures into a single stacked figure
     combined_fig = go.Figure()
     
-    # Let's create a stacked figure
-    for i, output_col in enumerate(output_cols):
-        scores = []
-        for prompt_key in prompt_keys:
-            if output_col in avg_scores and prompt_key in avg_scores[output_col]:
-                score = avg_scores[output_col][prompt_key]
-                if score is not None:
-                    scores.append(score)
+    try:
+        # Let's create a grouped bar chart
+        for i, output_col in enumerate(output_cols):
+            scores = []
+            for prompt_key in prompt_keys:
+                if output_col in avg_scores and prompt_key in avg_scores[output_col]:
+                    score = avg_scores[output_col][prompt_key]
+                    if score is not None:
+                        scores.append(score)
+                    else:
+                        scores.append(0)
                 else:
                     scores.append(0)
-            else:
-                scores.append(0)
+            
+            combined_fig.add_trace(go.Bar(
+                y=prompt_keys,
+                x=scores,
+                name=output_col,
+                orientation='h',
+                text=[f"{score:.2f}" if score > 0 else "N/A" for score in scores],
+                textposition='auto'
+            ))
         
-        combined_fig.add_trace(go.Bar(
-            y=prompt_keys,
-            x=scores,
-            name=output_col,
-            orientation='h',
-            text=[f"{score:.2f}" if score > 0 else "N/A" for score in scores],
-            textposition='auto'
-        ))
-    
-    # Update layout
-    combined_fig.update_layout(
-        title="Comparison of Output Columns Across Metrics",
-        xaxis_title="Score",
-        yaxis_title="Metric",
-        barmode='group',
-        height=300 + (50 * len(prompt_keys)),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="right",
-            x=1
+        # Update layout
+        combined_fig.update_layout(
+            title="Comparison of Output Columns Across Metrics",
+            xaxis_title="Score",
+            yaxis_title="Metric",
+            barmode='group',
+            height=300 + (50 * len(prompt_keys)),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1
+            )
         )
-    )
+    except Exception as e:
+        st.error(f"Error creating visualization: {e}")
+        # Create a basic error figure
+        combined_fig = go.Figure()
+        combined_fig.update_layout(
+            title="Error creating visualization",
+            annotations=[dict(
+                text=f"An error occurred: {str(e)}",
+                showarrow=False,
+                xref="paper",
+                yref="paper",
+                x=0.5,
+                y=0.5
+            )]
+        )
     
     return combined_fig
 
