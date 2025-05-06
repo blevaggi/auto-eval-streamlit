@@ -561,8 +561,8 @@ def add_tab3_content():
             with col1:
                 eval_model = st.selectbox(
                     "Evaluation Model", 
-                    ["o3-mini-2025-01-31", "o1-2024-12-17", "gpt-4o-2024-05-13"], 
-                    index=2,
+                    [ "gpt-4o-2024-05-13", "gpt-4o-mini-2024-07-18", "gpt-4.1-2025-04-14", "gpt-4.1-mini-2025-04-14", "o3-mini-2025-01-31"], 
+                    index=0,
                     help="Model used for running evaluations"
                 )
             
