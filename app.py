@@ -280,7 +280,11 @@ def generate_evaluation_templates(metrics_list, is_conversation):
                 # Create different templates for conversation vs non-conversation
                 if is_conversation:
                     # For conversation mode, we evaluate the entire conversation
-                    prompt_template = f"""# Parameter Evaluation: {metric_name} - {param_key}
+                    prompt_template = f"""# Role: You live, breathe, and are obsessed with LLM evaluation. Ensuring that LLMs produce the best outputs is your passion
+
+# Task: Evaluate the following LLM output to ensure whether it passes on this eval parameter.
+
+# Parameter Evaluation: {metric_name} - {param_key}
 
 ## Context
 {evaluation_context}
@@ -301,12 +305,16 @@ Score this conversation ONLY on the specific parameter "{param_key}" using this 
 0.5: Partially meets the parameter requirements
 1.0: Fully meets the parameter requirements
 
-Provide your score and detailed justification based solely on this specific parameter as JSON.
+Provide your score and a detailed justification using direct examples as evidence -- based solely on this specific parameter as JSON.
 Do not consider any other aspects of quality outside this parameter's definition.
 """
                 else:
                     # For non-conversation mode, we evaluate input-output pairs
-                    prompt_template = f"""# Parameter Evaluation: {metric_name} - {param_key}
+                    prompt_template = f"""# Role: You live, breathe, and are obsessed with LLM evaluation. Ensuring that LLMs produce the best outputs is your passion
+
+# Task: Evaluate the following LLM output to ensure whether it passes on this eval parameter.
+
+# Parameter Evaluation: {metric_name} - {param_key}
 
 ## Context
 {evaluation_context}
@@ -330,7 +338,7 @@ Score this output ONLY on the specific parameter "{param_key}" using this rubric
 0.5: Partially meets the parameter requirements
 1.0: Fully meets the parameter requirements
 
-Provide your score and detailed justification based solely on this specific parameter as JSON.
+Provide your score and a detailed justification citing direct examples as evidence -- based solely on this specific parameter as JSON.
 Do not consider any other aspects of quality outside this parameter's definition.
 """
                 parameter_prompt_templates[prompt_key] = prompt_template
@@ -338,7 +346,11 @@ Do not consider any other aspects of quality outside this parameter's definition
                 # Create pairwise template
                 if is_conversation:
                     # For conversation mode, we compare two complete conversations
-                    pairwise_template = f"""# Pairwise Parameter Evaluation: {metric_name} - {param_key}
+                    pairwise_template = f"""# Role: You live, breathe, and are obsessed with LLM evaluation. Ensuring that LLMs produce the best outputs is your passion
+
+# Task: Evaluate the following LLM output to ensure whether it passes on this eval parameter.
+
+# Pairwise Parameter Evaluation: {metric_name} - {param_key}
 
 ## Context
 This is a pairwise comparison focusing only on the specific parameter for CONVERSATION evaluation.
@@ -360,13 +372,22 @@ Conversation B:
 Compare these conversations ONLY on the specific parameter "{param_key}" using this criteria:
 - Which conversation better satisfies this parameter? 
 - Respond with "A is better", "B is better", or "Equivalent" if they are too similar to distinguish.
+- Quantify how much better the winning conversation was with one of these tags: 
+    * Equivalent -- if you answered Equivalent 
+    * Slightly -- if you decided the winning response was only a bit better
+    * Moderately -- if you decided the winning response was better but the loser wasn't significantly far behind
+    * Majorly -- if the winning response was a clear winner, hands-down, and the loser was way worse.  
 
-Provide a detailed justification based solely on this specific parameter.
+Provide your score and a detailed justification using direct examples as evidence -- based solely on this specific parameter as JSON.
 Do not consider any other aspects of quality outside this parameter's definition.
 """
                 else:
                     # For non-conversation mode, we compare two input-output pairs
-                    pairwise_template = f"""# Pairwise Parameter Evaluation: {metric_name} - {param_key}
+                    pairwise_template = f"""# Role: You live, breathe, and are obsessed with LLM evaluation. Ensuring that LLMs produce the best outputs is your passion
+
+# Task: Evaluate the following LLM output to ensure whether it passes on this eval parameter.
+
+# Pairwise Parameter Evaluation: {metric_name} - {param_key}
 
 ## Context
 This is a pairwise comparison focusing only on the specific parameter for SINGLE-TURN evaluation.
@@ -391,8 +412,9 @@ Output B:
 Compare these outputs ONLY on the specific parameter "{param_key}" using this criteria:
 - Which output better satisfies this parameter? 
 - Respond with "A is better", "B is better", or "Equivalent" if they are too similar to distinguish.
+- Quantify how much better the winning conversation was as: slightly, moderately, or majorly.
 
-Provide a detailed justification based solely on this specific parameter.
+Provide your score and a detailed justification using direct examples as evidence -- based solely on this specific parameter as JSON.
 Do not consider any other aspects of quality outside this parameter's definition.
 """
                 pairwise_prompt_templates[prompt_key] = pairwise_template
