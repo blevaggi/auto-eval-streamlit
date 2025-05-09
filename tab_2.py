@@ -10,7 +10,7 @@ def display_metrics_and_prompts(pipeline_results_for_display):
     """
     pipeline_results = pipeline_results_for_display
     if not pipeline_results:
-        st.info("No metrics available yet. Please generate metrics in Tab 1 first.")
+        st.info("No metrics available yet. Please generate or upload metrics in Tab 1 first.")
         return
     
     # Extract metrics from the results
