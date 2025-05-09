@@ -258,10 +258,6 @@ def display_enhanced_pairwise_results(results, prompt_keys, reduce_order_bias=Fa
         st.info("No pairwise evaluation results to display.")
         return
     
-    # Add an overall summary pie chart at the top
-    st.subheader("Overall Results Summary")
-    create_overall_summary_chart(results, prompt_keys, reduce_order_bias)
-    
     # Create a dataframe from the results for the summary table
     rows = []
     for result in results:
@@ -583,208 +579,6 @@ def create_big_donut_chart(df, parameter, param_name, color_scale):
         """,
         unsafe_allow_html=True
     )
-
-
-def create_overall_summary_chart(results, prompt_keys, reduce_order_bias=False):
-    """
-    Create an overall summary pie chart showing the distribution of results
-    across all parameters (percentage of A wins, B wins, and ties)
-    """
-    import pandas as pd
-    import plotly.graph_objects as go
-    import plotly.express as px
-    import json
-    
-    # Early exit if no results
-    if not results:
-        st.info("No results available for summary.")
-        return
-    
-    # Count total number of evaluations
-    total_a_wins = 0
-    total_b_wins = 0
-    total_ties = 0
-    total_skipped = 0
-    
-    # Process all results
-    for result in results:
-        if result.get("status") == "skipped":
-            total_skipped += len(prompt_keys)
-            continue
-            
-        for prompt_key in prompt_keys:
-            eval_result = result.get("evals", {}).get(prompt_key, "N/A")
-            
-            # Determine the winner based on evaluation type
-            if reduce_order_bias:
-                # For reduced order bias, use the combined result
-                try:
-                    if isinstance(eval_result, dict) and "combined_result" in eval_result:
-                        combined = eval_result["combined_result"]
-                        if isinstance(combined, dict) and "final_result" in combined:
-                            result_text = combined["final_result"].lower()
-                            if "a win" in result_text:
-                                total_a_wins += 1
-                            elif "b win" in result_text:
-                                total_b_wins += 1
-                            elif "tie" in result_text or "equivalent" in result_text:
-                                total_ties += 1
-                            else:
-                                total_skipped += 1  # Count as skipped if unclear
-                        else:
-                            total_skipped += 1
-                    else:
-                        total_skipped += 1
-                except:
-                    total_skipped += 1
-            else:
-                # For single evaluation, parse the result
-                try:
-                    winner = None
-                    if isinstance(eval_result, str):
-                        # Try to parse JSON
-                        try:
-                            eval_data = json.loads(eval_result)
-                            # Look for winner field
-                            if "winner" in eval_data:
-                                winner = eval_data["winner"]
-                            elif "preference" in eval_data:
-                                winner = eval_data["preference"]
-                            elif "result" in eval_data:
-                                winner = eval_data["result"]
-                            else:
-                                # Search all string values
-                                for k, v in eval_data.items():
-                                    if isinstance(v, str) and any(phrase in v.lower() for phrase in ["a is better", "b is better", "equivalent"]):
-                                        winner = v
-                                        break
-                        except:
-                            # If can't parse JSON, try to find winner in raw string
-                            result_lower = eval_result.lower()
-                            if "a is better" in result_lower or "a wins" in result_lower:
-                                winner = "A"
-                            elif "b is better" in result_lower or "b wins" in result_lower:
-                                winner = "B"
-                            elif "equivalent" in result_lower or "tie" in result_lower:
-                                winner = "Tie"
-                    
-                    # Count based on winner
-                    if winner:
-                        winner_lower = winner.lower()
-                        if "a" in winner_lower and "win" in winner_lower or winner_lower == "a":
-                            total_a_wins += 1
-                        elif "b" in winner_lower and "win" in winner_lower or winner_lower == "b":
-                            total_b_wins += 1
-                        elif "tie" in winner_lower or "equivalent" in winner_lower or "equal" in winner_lower:
-                            total_ties += 1
-                        else:
-                            total_skipped += 1
-                    else:
-                        total_skipped += 1
-                except:
-                    total_skipped += 1
-    
-    # Calculate total (excluding skipped for percentage calculation)
-    total_valid = total_a_wins + total_b_wins + total_ties
-    
-    # Prepare data for pie chart
-    if total_valid > 0:
-        # Calculate percentages
-        a_percent = (total_a_wins / total_valid) * 100
-        b_percent = (total_b_wins / total_valid) * 100
-        tie_percent = (total_ties / total_valid) * 100
-        
-        # Create the pie chart with Plotly
-        labels = ['A Wins', 'B Wins', 'Tied']
-        values = [total_a_wins, total_b_wins, total_ties]
-        colors = ['#4CAF50', '#2196F3', '#FFC107']
-        
-        fig = go.Figure(data=[go.Pie(
-            labels=labels,
-            values=values,
-            hole=.4,  # Make it a donut chart
-            marker=dict(colors=colors),
-            textinfo='label+percent',
-            textposition='outside',
-            insidetextorientation='radial',
-            pull=[0.05, 0.05, 0.05],  # Pull all slices slightly out
-            texttemplate='%{label}: %{percent:.1f}%'
-        )])
-        
-        fig.update_layout(
-            title_text='Overall Distribution of Results',
-            title_x=0.5,  # Center the title
-            title_font=dict(size=24),
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="center",
-                x=0.5
-            ),
-            height=500,
-            width=700,
-            margin=dict(t=80, b=80, l=80, r=80)
-        )
-        
-        # Display the chart
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Add a detailed breakdown below the chart
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric(
-                "A Wins", 
-                f"{total_a_wins} ({a_percent:.1f}%)",
-                delta=None, 
-                delta_color="normal"
-            )
-            
-        with col2:
-            st.metric(
-                "B Wins", 
-                f"{total_b_wins} ({b_percent:.1f}%)",
-                delta=None, 
-                delta_color="normal"
-            )
-            
-        with col3:
-            st.metric(
-                "Ties", 
-                f"{total_ties} ({tie_percent:.1f}%)",
-                delta=None, 
-                delta_color="normal"
-            )
-        
-        # If there were skipped evaluations, show them too
-        if total_skipped > 0:
-            st.info(f"Additionally, {total_skipped} evaluations were skipped or had unclear results.")
-            
-        # Add text analysis of the results
-        st.subheader("Summary Analysis")
-        
-        # Determine the overall winner
-        if a_percent > b_percent and a_percent > tie_percent:
-            lead_margin = a_percent - b_percent
-            st.markdown(f"**Model A leads overall** with {a_percent:.1f}% of wins across all parameters, " +
-                       f"leading Model B by {lead_margin:.1f} percentage points.")
-        elif b_percent > a_percent and b_percent > tie_percent:
-            lead_margin = b_percent - a_percent
-            st.markdown(f"**Model B leads overall** with {b_percent:.1f}% of wins across all parameters, " +
-                       f"leading Model A by {lead_margin:.1f} percentage points.")
-        elif tie_percent > a_percent and tie_percent > b_percent:
-            st.markdown(f"Most evaluations resulted in **ties** ({tie_percent:.1f}%), suggesting the models " +
-                       f"perform similarly across the evaluated parameters.")
-        else:
-            # Very close results
-            st.markdown("Results are very close between models, with no clear overall winner. " +
-                       "Check individual parameters for differences in specific capabilities.")
-            
-    else:
-        st.warning("No valid evaluation results to display in summary chart.")
-
-
 
 def download_csv_button(df, filename="data.csv"):
     """
@@ -1402,14 +1196,9 @@ def create_pairwise_download_section(results, filename_prefix="pairwise_evaluati
 
 def add_tab4_content():
     """
-    Add the content for Tab 4 (Run Pairwise Evaluations) with enhanced visualization,
-    fixed download functionality, and overall summary pie chart
+    Add the content for Tab 4 (Run Pairwise Evaluations) with enhanced visualization
+    and fixed download functionality
     """
-    import pandas as pd
-    import json
-    import datetime
-    import base64
-    import io
     st.header("Run Pairwise Evaluations on Your Data")
     st.info("Upload a spreadsheet with paired outputs and compare them using your generated metrics.")
     

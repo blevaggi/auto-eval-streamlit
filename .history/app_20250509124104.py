@@ -713,7 +713,7 @@ def main():
             help="Model used for generating metrics and customizing rubrics"
         )
 
-        if st.button("💾 Click to save your key!"):
+        if st.button("💾 Click me to proceed!"):
             if api_key:
                 st.session_state.client = initialize_client(api_key)
                 st.session_state.model = model
@@ -732,12 +732,12 @@ def main():
         # TEXT FIELDS FOR THE INPUT PACKAGE
         # Ask for the Task Summary
         task_summary = st.text_input(
-            """In just one high-level sentence, describe what this use case is. It's a credit card headline, it's an intake bot, it's a follow-up SMS, etc. """, 
+            "Task Summary", 
             help="In just one high-level sentence, describe what this use case is. It's a credit card headline, it's an intake bot, it's a follow-up SMS, etc. ", placeholder="Conversational intake conversation between a user with a problem and the JustAnswer chatbot to drive conversion to service")
 
         # Ask for deeper Context
         context = st.text_area(
-            "Context: Describe where and how this content will be use",
+            "Context",
             help="Describe where and how this content will be used",
             placeholder="The user has just landed on the JustAnswer website. We have greeted them with a chatbot named Pearl who invites them to talk about their issue. Once the user sends a message, the bot should respond with intake questions designed to gather more context before connecting them with a human JustAnswer professional.",
             height=100)

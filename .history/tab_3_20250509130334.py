@@ -435,21 +435,25 @@ def create_spider_chart(avg_scores, prompt_keys, output_cols):
 
 def create_evaluation_summary(avg_scores, prompt_keys, output_cols):
     """
-    Create a summary of scores, maximums, and percentages
-    that only counts metrics that were actually run
+    Create a visually appealing summary of total scores, maximums, and percentages
     """
     import pandas as pd
     import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
     import numpy as np
     
     # First, create a dataframe with all the scores
     summary_df = pd.DataFrame(index=output_cols)
     
-    # Set maximum score per item to 1 (0-1 scale)
-    max_score_per_item = 1
-    
-    # Track which metrics were actually run for each output column
-    metrics_run = {output_col: [] for output_col in output_cols}
+    # Get maximum possible score (assume 5 if we can't determine)
+    max_score_per_item = 5  # Default assumption
+    for output_col in output_cols:
+        if output_col in avg_scores:
+            for prompt_key in prompt_keys:
+                if prompt_key in avg_scores[output_col]:
+                    score = avg_scores[output_col][prompt_key]
+                    if score is not None and score > max_score_per_item:
+                        max_score_per_item = int(np.ceil(score))  # Round up to next integer
     
     # For each metric
     for prompt_key in prompt_keys:
@@ -460,94 +464,58 @@ def create_evaluation_summary(avg_scores, prompt_keys, output_cols):
                 score = avg_scores[output_col][prompt_key]
                 if score is not None:
                     summary_df.loc[output_col, metric_name] = score
-                    # Track that this metric was actually run
-                    metrics_run[output_col].append(metric_name)
                 else:
                     summary_df.loc[output_col, metric_name] = 0
             else:
                 summary_df.loc[output_col, metric_name] = 0
     
-    # Calculate row totals - only for metrics that were actually run
-    for output_col in output_cols:
-        # Calculate the total score for metrics that were run
-        total_score = sum(summary_df.loc[output_col, metric] for metric in metrics_run[output_col])
-        summary_df.loc[output_col, "Total"] = total_score
-        
-        # Set max possible based on number of metrics actually run
-        max_possible = len(metrics_run[output_col]) * max_score_per_item
-        summary_df.loc[output_col, "Max Possible"] = max_possible
-        
-        # Calculate percentage
-        if max_possible > 0:
-            summary_df.loc[output_col, "Percentage"] = (total_score / max_possible * 100).round(1)
-        else:
-            summary_df.loc[output_col, "Percentage"] = 0
+    # Calculate row and column totals
+    total_possible_per_metric = max_score_per_item * len(summary_df)
+    total_possible_per_model = max_score_per_item * len(prompt_keys)
+    
+    # Add totals to the dataframe
+    summary_df["Total"] = summary_df.sum(axis=1)
+    summary_df["Max Possible"] = total_possible_per_model
+    summary_df["Percentage"] = (summary_df["Total"] / summary_df["Max Possible"] * 100).round(1)
     
     # Create a row for totals
-    all_metrics_run = set()
-    for metrics in metrics_run.values():
-        all_metrics_run.update(metrics)
+    totals = pd.DataFrame({
+        metric: summary_df[metric].sum() for metric in summary_df.columns if metric != "Max Possible" and metric != "Percentage"
+    }, index=["Total"])
     
-    # Calculate the total score across all models
-    metric_totals = {}
-    for metric in all_metrics_run:
-        metric_totals[metric] = sum(summary_df.loc[output_col, metric] for output_col in output_cols)
-    
-    # Create the totals row
-    totals_data = {}
-    for col in summary_df.columns:
-        if col in ["Max Possible", "Percentage"]:
-            continue
-        elif col == "Total":
-            totals_data[col] = sum(metric_totals.values())
-        else:
-            totals_data[col] = metric_totals.get(col, 0)
-    
-    # Calculate max possible across all models
-    total_max_possible = sum(summary_df["Max Possible"])
-    totals_data["Max Possible"] = total_max_possible
-    
-    # Calculate overall percentage
-    if total_max_possible > 0:
-        totals_data["Percentage"] = (totals_data["Total"] / total_max_possible * 100).round(1)
-    else:
-        totals_data["Percentage"] = 0
-    
-    # Add totals row
-    totals = pd.DataFrame(totals_data, index=["Total"])
+    totals["Max Possible"] = total_possible_per_model * len(output_cols)
+    totals["Percentage"] = (totals["Total"] / totals["Max Possible"] * 100).round(1)
     
     # Combine with the summary
     final_df = pd.concat([summary_df, totals])
     
     # Create a styled version for display
-    # st.subheader("Evaluation Summary")
-    # st.caption("Note: Max Possible only counts metrics that were actually run")
+    st.subheader("Evaluation Summary")
     
-    # # Display the dataframe with formatting
-    # st.dataframe(final_df.style.background_gradient(
-    #     subset=pd.IndexSlice[:, [col for col in final_df.columns if col not in ["Max Possible", "Percentage"]]], 
-    #     cmap="Blues", 
-    #     vmin=0, 
-    #     vmax=max_score_per_item
-    #))
-   
+    # Display the dataframe with formatting
+    st.dataframe(final_df.style.background_gradient(
+        subset=pd.IndexSlice[:, [col for col in final_df.columns if col != "Max Possible"]], 
+        cmap="Blues", 
+        vmin=0, 
+        vmax=max_score_per_item
+    ))
     
     # Create score bars visualization
-    create_score_bars(summary_df, max_score_per_item)
+    create_score_bars(summary_df, max_score_per_item, total_possible_per_model)
     
     return final_df
 
-def create_score_bars(summary_df, max_score_per_item):
+def create_score_bars(summary_df, max_score_per_item, total_possible):
     """
     Create interactive bar charts showing scores, totals, and percentages
-    with correct scale and only counting metrics that were run
     """
     import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
     
     # Remove utility columns for visualization
     viz_df = summary_df.drop(columns=["Max Possible", "Percentage"])
     
-    # Prepare data for grouped bar chart of individual scores
+    # Prepare data for stacked bar chart of individual scores
     fig1 = go.Figure()
     
     # Add individual metric bars for each output column
@@ -557,16 +525,15 @@ def create_score_bars(summary_df, max_score_per_item):
                 name=metric,
                 x=viz_df.index,
                 y=viz_df[metric],
-                text=viz_df[metric].round(2),
+                text=viz_df[metric].round(1),
                 textposition='auto',
             ))
     
     # Customize layout for individual metrics
     fig1.update_layout(
-        title="Individual Metric Scores by Model (0-1 scale)",
+        title="Individual Metric Scores by Model",
         xaxis_title="Model",
         yaxis_title="Score",
-        yaxis=dict(range=[0, max_score_per_item * 1.1]),
         barmode='group',
         height=400,
         legend=dict(
@@ -586,7 +553,7 @@ def create_score_bars(summary_df, max_score_per_item):
         x=summary_df.index,
         y=summary_df["Total"],
         marker_color='royalblue',
-        text=summary_df["Total"].round(2),
+        text=summary_df["Total"].round(1),
         textposition='auto',
         name="Total Score"
     ))
@@ -604,32 +571,22 @@ def create_score_bars(summary_df, max_score_per_item):
         name="Percentage of Maximum"
     ))
     
-    # Add a line for each model's maximum possible score
-    for i, idx in enumerate(summary_df.index):
-        max_val = summary_df.loc[idx, "Max Possible"]
-        fig2.add_trace(go.Scatter(
-            x=[idx],
-            y=[max_val],
-            mode='markers',
-            marker=dict(
-                symbol='line-ns',
-                size=16,
-                color='gray',
-                line=dict(width=2)
-            ),
-            name=f"Max for {idx}" if i == 0 else None,  # Only add to legend once
-            showlegend=(i == 0)
-        ))
+    # Add a line for the maximum possible score
+    fig2.add_trace(go.Scatter(
+        x=summary_df.index,
+        y=[total_possible] * len(summary_df.index),
+        mode='lines',
+        line=dict(width=2, dash='dash', color='gray'),
+        name=f"Maximum Possible ({total_possible})"
+    ))
     
     # Customize layout for totals chart
-    max_y_value = max(summary_df["Max Possible"].max() * 1.1, summary_df["Total"].max() * 1.2)
-    
     fig2.update_layout(
-        title="Total Scores and Percentages by Model (only counting metrics that were run)",
+        title="Total Scores and Percentages by Model",
         xaxis_title="Model",
         yaxis=dict(
             title="Total Score",
-            range=[0, max_y_value]
+            range=[0, total_possible * 1.1]
         ),
         yaxis2=dict(
             title="Percentage",
@@ -651,7 +608,7 @@ def create_score_bars(summary_df, max_score_per_item):
     )
     
     # Display both charts
-    # st.plotly_chart(fig1, use_container_width=True)
+    st.plotly_chart(fig1, use_container_width=True)
     st.plotly_chart(fig2, use_container_width=True)
 
 # Display function for evaluation results
@@ -672,6 +629,8 @@ def display_evaluation_results_multi_output(results, prompt_keys, output_cols):
         with tab1:
             st.subheader("Comparison of Average Scores")
             
+            # Summary section with totals, maximums, and percentages
+            summary_df = create_evaluation_summary(avg_scores, prompt_keys, output_cols)
             
             # Bar chart comparison
             fig = create_comparison_chart(avg_scores, prompt_keys, output_cols)
@@ -683,11 +642,16 @@ def display_evaluation_results_multi_output(results, prompt_keys, output_cols):
                 spider_fig = create_spider_chart(avg_scores, prompt_keys, output_cols)
                 st.plotly_chart(spider_fig)
                 
+                st.markdown("""
+                **How to read this chart:**
+                
+                - Each axis represents a metric
+                - Each colored line represents an output column
+                - Points further from center have higher scores
+                - Compare the shapes to see strengths/weaknesses
+                """)
             except Exception as e:
                 st.error(f"Could not create radar chart: {str(e)}")
-
-            # Summary section with totals, maximums, and percentages
-            summary_df = create_evaluation_summary(avg_scores, prompt_keys, output_cols)
         
         # Then create all the individual result tabs
         result_tabs = st.tabs([f"Results: {col}" for col in output_cols])
@@ -707,6 +671,8 @@ def display_evaluation_results_multi_output(results, prompt_keys, output_cols):
         with comparison_tab:
             st.subheader("Comparison of Average Scores")
             
+            # Summary section with totals, maximums, and percentages
+            summary_df = create_evaluation_summary(avg_scores, prompt_keys, output_cols)
             
             # Bar chart
             fig = create_comparison_chart(avg_scores, prompt_keys, output_cols)
@@ -728,9 +694,6 @@ def display_evaluation_results_multi_output(results, prompt_keys, output_cols):
                 """)
             except Exception as e:
                 st.error(f"Could not create radar chart: {str(e)}")
-            
-            # Summary section with totals, maximums, and percentages
-            summary_df = create_evaluation_summary(avg_scores, prompt_keys, output_cols)
 
 
 

@@ -520,17 +520,16 @@ def create_evaluation_summary(avg_scores, prompt_keys, output_cols):
     final_df = pd.concat([summary_df, totals])
     
     # Create a styled version for display
-    # st.subheader("Evaluation Summary")
-    # st.caption("Note: Max Possible only counts metrics that were actually run")
+    st.subheader("Evaluation Summary")
+    st.caption("Note: Max Possible only counts metrics that were actually run")
     
-    # # Display the dataframe with formatting
-    # st.dataframe(final_df.style.background_gradient(
-    #     subset=pd.IndexSlice[:, [col for col in final_df.columns if col not in ["Max Possible", "Percentage"]]], 
-    #     cmap="Blues", 
-    #     vmin=0, 
-    #     vmax=max_score_per_item
-    #))
-   
+    # Display the dataframe with formatting
+    st.dataframe(final_df.style.background_gradient(
+        subset=pd.IndexSlice[:, [col for col in final_df.columns if col not in ["Max Possible", "Percentage"]]], 
+        cmap="Blues", 
+        vmin=0, 
+        vmax=max_score_per_item
+    ))
     
     # Create score bars visualization
     create_score_bars(summary_df, max_score_per_item)
@@ -651,7 +650,7 @@ def create_score_bars(summary_df, max_score_per_item):
     )
     
     # Display both charts
-    # st.plotly_chart(fig1, use_container_width=True)
+    st.plotly_chart(fig1, use_container_width=True)
     st.plotly_chart(fig2, use_container_width=True)
 
 # Display function for evaluation results
@@ -672,6 +671,8 @@ def display_evaluation_results_multi_output(results, prompt_keys, output_cols):
         with tab1:
             st.subheader("Comparison of Average Scores")
             
+            # Summary section with totals, maximums, and percentages
+            summary_df = create_evaluation_summary(avg_scores, prompt_keys, output_cols)
             
             # Bar chart comparison
             fig = create_comparison_chart(avg_scores, prompt_keys, output_cols)
@@ -683,11 +684,16 @@ def display_evaluation_results_multi_output(results, prompt_keys, output_cols):
                 spider_fig = create_spider_chart(avg_scores, prompt_keys, output_cols)
                 st.plotly_chart(spider_fig)
                 
+                st.markdown("""
+                **How to read this chart:**
+                
+                - Each axis represents a metric
+                - Each colored line represents an output column
+                - Points further from center have higher scores
+                - Compare the shapes to see strengths/weaknesses
+                """)
             except Exception as e:
                 st.error(f"Could not create radar chart: {str(e)}")
-
-            # Summary section with totals, maximums, and percentages
-            summary_df = create_evaluation_summary(avg_scores, prompt_keys, output_cols)
         
         # Then create all the individual result tabs
         result_tabs = st.tabs([f"Results: {col}" for col in output_cols])

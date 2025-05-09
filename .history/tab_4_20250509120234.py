@@ -258,10 +258,6 @@ def display_enhanced_pairwise_results(results, prompt_keys, reduce_order_bias=Fa
         st.info("No pairwise evaluation results to display.")
         return
     
-    # Add an overall summary pie chart at the top
-    st.subheader("Overall Results Summary")
-    create_overall_summary_chart(results, prompt_keys, reduce_order_bias)
-    
     # Create a dataframe from the results for the summary table
     rows = []
     for result in results:
@@ -431,9 +427,12 @@ def display_enhanced_pairwise_results(results, prompt_keys, reduce_order_bias=Fa
                            "<div style='width:20px;height:20px;background-color:#9E9E9E;margin-right:10px;'></div>"
                            "<div>Skipped</div></div>", unsafe_allow_html=True)
             
-            # Add a new download section using the HTML-based approach
+            # Add a button to download the visualization as a PNG or CSV
             st.markdown("---")
-            create_pairwise_download_section(results, "pairwise_viz_data")
+            st.subheader("Download Options")
+            col1, col2 = st.columns(2)
+            with col1:
+                download_csv_button(viz_df, "pairwise_viz_data.csv")
             
         else:
             st.info("No data available for visualization. Run evaluations to see charts.")
@@ -583,208 +582,6 @@ def create_big_donut_chart(df, parameter, param_name, color_scale):
         """,
         unsafe_allow_html=True
     )
-
-
-def create_overall_summary_chart(results, prompt_keys, reduce_order_bias=False):
-    """
-    Create an overall summary pie chart showing the distribution of results
-    across all parameters (percentage of A wins, B wins, and ties)
-    """
-    import pandas as pd
-    import plotly.graph_objects as go
-    import plotly.express as px
-    import json
-    
-    # Early exit if no results
-    if not results:
-        st.info("No results available for summary.")
-        return
-    
-    # Count total number of evaluations
-    total_a_wins = 0
-    total_b_wins = 0
-    total_ties = 0
-    total_skipped = 0
-    
-    # Process all results
-    for result in results:
-        if result.get("status") == "skipped":
-            total_skipped += len(prompt_keys)
-            continue
-            
-        for prompt_key in prompt_keys:
-            eval_result = result.get("evals", {}).get(prompt_key, "N/A")
-            
-            # Determine the winner based on evaluation type
-            if reduce_order_bias:
-                # For reduced order bias, use the combined result
-                try:
-                    if isinstance(eval_result, dict) and "combined_result" in eval_result:
-                        combined = eval_result["combined_result"]
-                        if isinstance(combined, dict) and "final_result" in combined:
-                            result_text = combined["final_result"].lower()
-                            if "a win" in result_text:
-                                total_a_wins += 1
-                            elif "b win" in result_text:
-                                total_b_wins += 1
-                            elif "tie" in result_text or "equivalent" in result_text:
-                                total_ties += 1
-                            else:
-                                total_skipped += 1  # Count as skipped if unclear
-                        else:
-                            total_skipped += 1
-                    else:
-                        total_skipped += 1
-                except:
-                    total_skipped += 1
-            else:
-                # For single evaluation, parse the result
-                try:
-                    winner = None
-                    if isinstance(eval_result, str):
-                        # Try to parse JSON
-                        try:
-                            eval_data = json.loads(eval_result)
-                            # Look for winner field
-                            if "winner" in eval_data:
-                                winner = eval_data["winner"]
-                            elif "preference" in eval_data:
-                                winner = eval_data["preference"]
-                            elif "result" in eval_data:
-                                winner = eval_data["result"]
-                            else:
-                                # Search all string values
-                                for k, v in eval_data.items():
-                                    if isinstance(v, str) and any(phrase in v.lower() for phrase in ["a is better", "b is better", "equivalent"]):
-                                        winner = v
-                                        break
-                        except:
-                            # If can't parse JSON, try to find winner in raw string
-                            result_lower = eval_result.lower()
-                            if "a is better" in result_lower or "a wins" in result_lower:
-                                winner = "A"
-                            elif "b is better" in result_lower or "b wins" in result_lower:
-                                winner = "B"
-                            elif "equivalent" in result_lower or "tie" in result_lower:
-                                winner = "Tie"
-                    
-                    # Count based on winner
-                    if winner:
-                        winner_lower = winner.lower()
-                        if "a" in winner_lower and "win" in winner_lower or winner_lower == "a":
-                            total_a_wins += 1
-                        elif "b" in winner_lower and "win" in winner_lower or winner_lower == "b":
-                            total_b_wins += 1
-                        elif "tie" in winner_lower or "equivalent" in winner_lower or "equal" in winner_lower:
-                            total_ties += 1
-                        else:
-                            total_skipped += 1
-                    else:
-                        total_skipped += 1
-                except:
-                    total_skipped += 1
-    
-    # Calculate total (excluding skipped for percentage calculation)
-    total_valid = total_a_wins + total_b_wins + total_ties
-    
-    # Prepare data for pie chart
-    if total_valid > 0:
-        # Calculate percentages
-        a_percent = (total_a_wins / total_valid) * 100
-        b_percent = (total_b_wins / total_valid) * 100
-        tie_percent = (total_ties / total_valid) * 100
-        
-        # Create the pie chart with Plotly
-        labels = ['A Wins', 'B Wins', 'Tied']
-        values = [total_a_wins, total_b_wins, total_ties]
-        colors = ['#4CAF50', '#2196F3', '#FFC107']
-        
-        fig = go.Figure(data=[go.Pie(
-            labels=labels,
-            values=values,
-            hole=.4,  # Make it a donut chart
-            marker=dict(colors=colors),
-            textinfo='label+percent',
-            textposition='outside',
-            insidetextorientation='radial',
-            pull=[0.05, 0.05, 0.05],  # Pull all slices slightly out
-            texttemplate='%{label}: %{percent:.1f}%'
-        )])
-        
-        fig.update_layout(
-            title_text='Overall Distribution of Results',
-            title_x=0.5,  # Center the title
-            title_font=dict(size=24),
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="center",
-                x=0.5
-            ),
-            height=500,
-            width=700,
-            margin=dict(t=80, b=80, l=80, r=80)
-        )
-        
-        # Display the chart
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # Add a detailed breakdown below the chart
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.metric(
-                "A Wins", 
-                f"{total_a_wins} ({a_percent:.1f}%)",
-                delta=None, 
-                delta_color="normal"
-            )
-            
-        with col2:
-            st.metric(
-                "B Wins", 
-                f"{total_b_wins} ({b_percent:.1f}%)",
-                delta=None, 
-                delta_color="normal"
-            )
-            
-        with col3:
-            st.metric(
-                "Ties", 
-                f"{total_ties} ({tie_percent:.1f}%)",
-                delta=None, 
-                delta_color="normal"
-            )
-        
-        # If there were skipped evaluations, show them too
-        if total_skipped > 0:
-            st.info(f"Additionally, {total_skipped} evaluations were skipped or had unclear results.")
-            
-        # Add text analysis of the results
-        st.subheader("Summary Analysis")
-        
-        # Determine the overall winner
-        if a_percent > b_percent and a_percent > tie_percent:
-            lead_margin = a_percent - b_percent
-            st.markdown(f"**Model A leads overall** with {a_percent:.1f}% of wins across all parameters, " +
-                       f"leading Model B by {lead_margin:.1f} percentage points.")
-        elif b_percent > a_percent and b_percent > tie_percent:
-            lead_margin = b_percent - a_percent
-            st.markdown(f"**Model B leads overall** with {b_percent:.1f}% of wins across all parameters, " +
-                       f"leading Model A by {lead_margin:.1f} percentage points.")
-        elif tie_percent > a_percent and tie_percent > b_percent:
-            st.markdown(f"Most evaluations resulted in **ties** ({tie_percent:.1f}%), suggesting the models " +
-                       f"perform similarly across the evaluated parameters.")
-        else:
-            # Very close results
-            st.markdown("Results are very close between models, with no clear overall winner. " +
-                       "Check individual parameters for differences in specific capabilities.")
-            
-    else:
-        st.warning("No valid evaluation results to display in summary chart.")
-
-
 
 def download_csv_button(df, filename="data.csv"):
     """
@@ -1273,143 +1070,10 @@ def export_pairwise_evaluation_results(results, filename_prefix="pairwise_evalua
     except Exception as e:
         st.warning(f"Could not create Excel export: {e}")
 
-def create_pairwise_download_section(results, filename_prefix="pairwise_evaluation_results"):
-    """
-    Create a separate section for pairwise evaluation downloads using HTML links instead of Streamlit buttons
-    This avoids the session state management issues that cause download buttons to fail
-    """
-    import datetime
-    import io
-    import uuid
-    import base64
-    import json
-    
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    
-    st.subheader("Export Results", anchor="exports")
-    
-    # Create a form for the downloads
-    with st.form(key="pairwise_download_form"):
-        col1, col2 = st.columns(2)
-        
-        # Store the data once to avoid recreating on every rerun
-        json_data = json.dumps(results, indent=2)
-        
-        # Export JSON using HTML download link
-        with col1:
-            json_filename = f"{filename_prefix}_{timestamp}.json"
-            b64_json = base64.b64encode(json_data.encode()).decode()
-            href_json = f'<a href="data:application/json;base64,{b64_json}" download="{json_filename}" class="downloadButton">💾 Download Results as JSON</a>'
-            st.markdown(href_json, unsafe_allow_html=True)
-            
-        # Create Excel data
-        excel_data = None
-        try:
-            import pandas as pd
-            
-            # Flatten the results into rows
-            rows = []
-            for result in results:
-                row_index = result.get("row_index", "N/A")
-                
-                if result.get("status") == "skipped":
-                    row_data = {
-                        "row_index": row_index,
-                        "status": "skipped",
-                        "reason": result.get("reason", "Unknown")
-                    }
-                    rows.append(row_data)
-                else:
-                    for prompt_key, eval_result in result.get("evals", {}).items():
-                        # Parse metric and parameter from the prompt key
-                        metric_name = prompt_key.split("::")[0] if "::" in prompt_key else ""
-                        param_name = prompt_key.split("::")[-1] if "::" in prompt_key else prompt_key
-                        
-                        row_data = {
-                            "row_index": row_index,
-                            "metric": metric_name,
-                            "parameter": param_name,
-                            "full_key": prompt_key,
-                            "raw_result": str(eval_result)[:1000]  # Truncate to avoid Excel issues
-                        }
-                        
-                        # Try to extract winner and justification
-                        try:
-                            if isinstance(eval_result, dict) and "combined_result" in eval_result:
-                                # For order bias reduced results
-                                combined = eval_result["combined_result"]
-                                if isinstance(combined, dict):
-                                    for k, v in combined.items():
-                                        if k in ["final_result", "reason", "ab_winner", "ba_winner"]:
-                                            row_data[k] = v
-                            elif isinstance(eval_result, str):
-                                # For regular results
-                                eval_data = json.loads(eval_result)
-                                if isinstance(eval_data, dict):
-                                    for k, v in eval_data.items():
-                                        if k in ["winner", "preference", "result", "justification", "explanation", "reasoning"]:
-                                            row_data[k] = v
-                        except:
-                            pass
-                        
-                        rows.append(row_data)
-            
-            # Create DataFrame
-            results_df = pd.DataFrame(rows)
-            
-            # Export to Excel
-            excel_buffer = io.BytesIO()
-            with pd.ExcelWriter(excel_buffer, engine="xlsxwriter") as writer:
-                results_df.to_excel(writer, sheet_name="Pairwise Evaluation Results", index=False)
-            
-            # Get the Excel data
-            excel_data = excel_buffer.getvalue()
-        except Exception as e:
-            st.warning(f"Could not create Excel export: {e}")
-        
-        # Excel download using HTML link
-        with col2:
-            if excel_data is not None:
-                excel_filename = f"{filename_prefix}_{timestamp}.xlsx"
-                b64_excel = base64.b64encode(excel_data).decode()
-                href_excel = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_excel}" download="{excel_filename}" class="downloadButton">📊 Download Results as Excel</a>'
-                st.markdown(href_excel, unsafe_allow_html=True)
-        
-        # Add a dummy submit button to create the form (required for Streamlit forms)
-        submitted = st.form_submit_button("Refresh Download Links")
-    
-    # Add some CSS for the download links
-    st.markdown("""
-        <style>
-        .downloadButton {
-            display: inline-block;
-            padding: 0.5em 1em;
-            background-color: #4e8cff;
-            color: white;
-            text-decoration: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-weight: 500;
-            margin: 0.5em 0;
-            text-align: center;
-            width: 100%;
-        }
-        .downloadButton:hover {
-            background-color: #3a7ce2;
-        }
-        </style>
-    """, unsafe_allow_html=True)
-
 def add_tab4_content():
     """
-    Add the content for Tab 4 (Run Pairwise Evaluations) with enhanced visualization,
-    fixed download functionality, and overall summary pie chart
+    Add the content for Tab 4 (Run Pairwise Evaluations) with enhanced visualization
     """
-    import pandas as pd
-    import json
-    import datetime
-    import base64
-    import io
     st.header("Run Pairwise Evaluations on Your Data")
     st.info("Upload a spreadsheet with paired outputs and compare them using your generated metrics.")
     
@@ -1594,11 +1258,14 @@ def add_tab4_content():
                         # Store results in session state
                         st.session_state.pairwise_evaluation_results = results
                         st.session_state.pairwise_reduce_order_bias = reduce_order_bias
-                        st.session_state.pairwise_selected_metrics = list(selected_metrics.keys())
                         
                         # Display results with enhanced visualization
                         display_enhanced_pairwise_results(results, list(selected_metrics.keys()), reduce_order_bias)
                         
+                        # Add export options
+                        st.subheader("Export Results")
+                        export_pairwise_evaluation_results_with_keys(results)
+                            
                     except Exception as e:
                         st.error(f"Error running pairwise evaluations: {e}")
                     finally:
@@ -1612,11 +1279,14 @@ def add_tab4_content():
         
         # Get the order bias setting from session state or default to False
         reduce_order_bias = st.session_state.get("pairwise_reduce_order_bias", False)
-        selected_metrics = st.session_state.get("pairwise_selected_metrics", list(pairwise_templates.keys()))
         
         # Display previous results with enhanced visualization
         display_enhanced_pairwise_results(
             st.session_state.pairwise_evaluation_results, 
-            selected_metrics,
+            list(pairwise_templates.keys()),
             reduce_order_bias
         )
+        
+        # Add export options
+        st.subheader("Export Results")
+        export_pairwise_evaluation_results_with_keys(st.session_state.pairwise_evaluation_results)

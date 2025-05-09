@@ -737,7 +737,7 @@ def main():
 
         # Ask for deeper Context
         context = st.text_area(
-            "Context: Describe where and how this content will be use",
+            "Context",
             help="Describe where and how this content will be used",
             placeholder="The user has just landed on the JustAnswer website. We have greeted them with a chatbot named Pearl who invites them to talk about their issue. Once the user sends a message, the bot should respond with intake questions designed to gather more context before connecting them with a human JustAnswer professional.",
             height=100)
