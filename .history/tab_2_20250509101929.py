@@ -4,11 +4,10 @@ import streamlit as st
 
 # All this tab does is show the metrics and parameters and their prompts, for closer user inspection
 
-def display_metrics_and_prompts(pipeline_results_for_display):
+def display_metrics_and_prompts(pipeline_results):
     """
     Display all metrics, descriptions, and associated prompts in Tab 2
     """
-    pipeline_results = pipeline_results_for_display
     if not pipeline_results:
         st.info("No metrics available yet. Please generate metrics in Tab 1 first.")
         return
@@ -95,6 +94,6 @@ def display_metrics_and_prompts(pipeline_results_for_display):
             else:
                 st.info("No parameters defined for this metric.")
 
-def add_tab2_content(pipeline_results_for_display):
-    tab_2 = display_metrics_and_prompts(pipeline_results_for_display)
+def add_tab2_content(pipeline_results):
+    tab_2 = display_metrics_and_prompts(pipeline_results)
     return tab_2

@@ -827,8 +827,7 @@ Tone must be professional
         st.info("Explore all metrics, their parameters, and evaluation prompts.")
         from tab_2 import add_tab2_content, display_metrics_and_prompts
         # Display metrics and prompts
-        pipeline_results_for_display = st.session_state.pipeline_results
-        add_tab2_content(pipeline_results_for_display)
+        add_tab2_content(pipeline_results)
 
     with tab3:
         st.header("Individual Evaluations")
