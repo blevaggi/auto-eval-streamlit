@@ -825,9 +825,9 @@ Tone must be professional
        
         st.header("Review Each Metric")
         st.info("Explore all metrics, their parameters, and evaluation prompts.")
-        from tab_2 import add_tab2_content
+        from tab_2 import add_tab2_content, display_metrics_and_prompts
         # Display metrics and prompts
-        display_metrics_and_prompts(st.session_state.pipeline_results)
+        add_tab2_content(st.session_state.pipeline_results)
 
     with tab3:
         st.header("Individual Evaluations")
