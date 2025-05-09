@@ -94,6 +94,6 @@ def display_metrics_and_prompts(pipeline_results):
             else:
                 st.info("No parameters defined for this metric.")
 
-def add_tab2_content():
+def add_tab2_content(st.session_state.pipeline_results):
     tab_2 = display_metrics_and_prompts(st.session_state.pipeline_results)
     return tab_2
