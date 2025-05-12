@@ -160,7 +160,7 @@ def generate_eval_metrics(client, input_package: Dict, model: str) -> List[Dict]
     
     
     # Start with an initial generation
-    with st.spinner("Generating customized eval metrics..."):
+    with st.spinner("Generating preliminary eval metrics..."):
         prompt_1 = f"""
         Look at the use case below. I need your help to understand the core requirements, success criteria, and fail states to identify and define the most specific, atomic, and measurable eval metrics for the use case. 
         
@@ -241,6 +241,18 @@ def generate_kshot_examples(client, input_package, metric_name, param_key, param
     """
     Generate k-shot examples for a specific parameter at different score levels (1.0, 0.5, 0.0)
     based on good and bad examples provided by the user.
+    
+    Args:
+        client: OpenAI client instance
+        input_package: Dictionary containing task details including good/bad examples
+        metric_name: Name of the metric
+        param_key: Key of the parameter
+        param_description: Description of the parameter
+        is_conversation: Boolean indicating if this is a conversation task
+        model: Model to use for generating examples
+        
+    Returns:
+        dict: Dictionary with keys '1.0', '0.5', '0.0' containing examples for each score level
     """
     system_message = """You are an expert at LLM evaluation and creating realistic examples for different quality levels.
     Your task is to create representative examples of outputs at different score levels (high quality, medium quality, low quality)
@@ -259,8 +271,7 @@ def generate_kshot_examples(client, input_package, metric_name, param_key, param
     
     content_type = "conversation" if is_conversation else "output"
     
-    with st.spinner(f"Generating examples for {metric_name} - {param_key}..."):
-        prompt = f"""
+    prompt = f"""
     Based on the parameter "{param_key}: {param_description}" for the metric "{metric_name}", 
     and the sample input and examples provided, create three examples representing different score levels:
     

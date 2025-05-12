@@ -160,7 +160,7 @@ def generate_eval_metrics(client, input_package: Dict, model: str) -> List[Dict]
     
     
     # Start with an initial generation
-    with st.spinner("Generating customized eval metrics..."):
+    with st.spinner("Generating preliminary eval metrics..."):
         prompt_1 = f"""
         Look at the use case below. I need your help to understand the core requirements, success criteria, and fail states to identify and define the most specific, atomic, and measurable eval metrics for the use case. 
         
