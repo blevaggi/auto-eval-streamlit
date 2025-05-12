@@ -445,7 +445,7 @@ def setup_evaluation_config(task_summary: str, sample_input: str,
     # First, detect if this is a conversation task
     conversation_analysis = detect_conversation_type(client, input_package, model)
     is_conversation = conversation_analysis.get("is_conversation", False)
-    st.divider()
+    
     # Generate metrics using the consolidated function
     eval_metrics_json_str = generate_eval_metrics(client, input_package, model)
     
@@ -737,14 +737,13 @@ def main():
 
         # TEXT FIELDS FOR THE INPUT PACKAGE
         # Ask for the Task Summary
-        st.subheader("Context")
         task_summary = st.text_input(
             """In just one high-level sentence, describe what this use case is. It's a credit card headline, it's an intake bot, it's a follow-up SMS, etc. """, 
             help="In just one high-level sentence, describe what this use case is. It's a credit card headline, it's an intake bot, it's a follow-up SMS, etc. ", placeholder="Conversational intake conversation between a user with a problem and the JustAnswer chatbot to drive conversion to service")
 
         # Ask for deeper Context
         context = st.text_area(
-            "Context: Describe where and how this content will be used",
+            "Context: Describe where and how this content will be use",
             help="Describe where and how this content will be used",
             placeholder="The user has just landed on the JustAnswer website. We have greeted them with a chatbot named Pearl who invites them to talk about their issue. Once the user sends a message, the bot should respond with intake questions designed to gather more context before connecting them with a human JustAnswer professional.",
             height=100)
@@ -769,7 +768,7 @@ Tone must be professional
             height=200)
         
         # Provide a representative sample input
-        st.subheader("Sample Input and Output Examples",divider=True)
+        st.text("Sample Input")
         sample_input = st.text_area("A representative sample input that would generate an output", height=100)
         
         # DYNAMIC EXAMPLES SECTION
@@ -815,8 +814,8 @@ Tone must be professional
             st.rerun()  # Rerun to show the new example field
         
         # Bad Examples Section
-        st.text("Bad Examples of outputs that would NOT pass evaluation")
-        # st.caption("Examples of outputs that would NOT pass evaluation")
+        st.subheader("Bad Examples")
+        st.caption("Examples of outputs that would NOT pass evaluation")
         
         for i, example in enumerate(st.session_state.bad_examples):
             col1, col2 = st.columns([10, 1])
@@ -841,10 +840,7 @@ Tone must be professional
         bad_examples_list = [ex for ex in st.session_state.bad_examples if ex.strip()]
 
         # Show the user the button to generate customized metrics based on the use case details
-
-        st.subheader("Run Pipeline", divider=True)
         if st.button("Generate Customized Metrics"):
-            
             if not api_key:
                 st.error("Please provide an API key in the sidebar first.")
             elif not requirements:
@@ -864,7 +860,7 @@ Tone must be professional
                         model=model_used
                     )
                 st.success("Metrics customized successfully!")
-        st.divider()
+
        # Add the Save/Load Metrics expander panel
         with st.expander("Save/Load Metrics", expanded=True):
             st.info("Save your current metrics or load previously generated metrics.")

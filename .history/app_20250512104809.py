@@ -842,7 +842,7 @@ Tone must be professional
 
         # Show the user the button to generate customized metrics based on the use case details
 
-        st.subheader("Run Pipeline", divider=True)
+        st.divider()
         if st.button("Generate Customized Metrics"):
             
             if not api_key:

@@ -744,7 +744,7 @@ def main():
 
         # Ask for deeper Context
         context = st.text_area(
-            "Context: Describe where and how this content will be used",
+            "Context: Describe where and how this content will be use",
             help="Describe where and how this content will be used",
             placeholder="The user has just landed on the JustAnswer website. We have greeted them with a chatbot named Pearl who invites them to talk about their issue. Once the user sends a message, the bot should respond with intake questions designed to gather more context before connecting them with a human JustAnswer professional.",
             height=100)
@@ -842,7 +842,7 @@ Tone must be professional
 
         # Show the user the button to generate customized metrics based on the use case details
 
-        st.subheader("Run Pipeline", divider=True)
+        st.divider()
         if st.button("Generate Customized Metrics"):
             
             if not api_key:

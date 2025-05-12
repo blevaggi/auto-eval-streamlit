@@ -744,7 +744,7 @@ def main():
 
         # Ask for deeper Context
         context = st.text_area(
-            "Context: Describe where and how this content will be used",
+            "Context: Describe where and how this content will be use",
             help="Describe where and how this content will be used",
             placeholder="The user has just landed on the JustAnswer website. We have greeted them with a chatbot named Pearl who invites them to talk about their issue. Once the user sends a message, the bot should respond with intake questions designed to gather more context before connecting them with a human JustAnswer professional.",
             height=100)
@@ -769,7 +769,7 @@ Tone must be professional
             height=200)
         
         # Provide a representative sample input
-        st.subheader("Sample Input and Output Examples",divider=True)
+        st.subheader("Sample Input",divider=True)
         sample_input = st.text_area("A representative sample input that would generate an output", height=100)
         
         # DYNAMIC EXAMPLES SECTION
@@ -815,7 +815,7 @@ Tone must be professional
             st.rerun()  # Rerun to show the new example field
         
         # Bad Examples Section
-        st.text("Bad Examples of outputs that would NOT pass evaluation")
+        st.subheader("Bad Examples of outputs that would NOT pass evaluation")
         # st.caption("Examples of outputs that would NOT pass evaluation")
         
         for i, example in enumerate(st.session_state.bad_examples):
@@ -842,9 +842,9 @@ Tone must be professional
 
         # Show the user the button to generate customized metrics based on the use case details
 
-        st.subheader("Run Pipeline", divider=True)
+        st.divider()
         if st.button("Generate Customized Metrics"):
-            
+            st.divider()
             if not api_key:
                 st.error("Please provide an API key in the sidebar first.")
             elif not requirements:
@@ -864,7 +864,7 @@ Tone must be professional
                         model=model_used
                     )
                 st.success("Metrics customized successfully!")
-        st.divider()
+
        # Add the Save/Load Metrics expander panel
         with st.expander("Save/Load Metrics", expanded=True):
             st.info("Save your current metrics or load previously generated metrics.")
