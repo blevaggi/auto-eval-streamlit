@@ -1419,13 +1419,6 @@ def add_tab4_content():
         st.warning("Please generate metrics in Tab 1 first before running pairwise evaluations.")
         return
     
-    # Get the current (potentially edited) prompts
-    _, pairwise_prompts = get_current_prompts()
-    
-    # Display the number of available prompts
-    st.write(f"Using {len(pairwise_prompts)} pairwise evaluation templates.")
-    
-
     # Get metrics and templates from session state
     pipeline_results = st.session_state.pipeline_results
     is_conversation = pipeline_results.get("is_conversation", False)

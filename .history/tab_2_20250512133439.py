@@ -3,29 +3,7 @@ import json
 
 # ====== TAB 2 FUNCTIONS ========
 
-# This tab shows the metrics and parameters and their prompts, and allows users to edit them
-
-import streamlit as st
-
-def get_current_prompts():
-    """
-    Helper function to get the current (potentially edited) prompt templates
-    for use in evaluation tabs
-    """
-    # Check if we have edited prompts in session state
-    if "edited_parameter_prompts" in st.session_state:
-        parameter_prompts = st.session_state.edited_parameter_prompts
-    else:
-        # Fall back to original prompts if no edits exist
-        parameter_prompts = st.session_state.pipeline_results.get("parameter_prompt_templates", {})
-    
-    if "edited_pairwise_prompts" in st.session_state:
-        pairwise_prompts = st.session_state.edited_pairwise_prompts
-    else:
-        # Fall back to original prompts if no edits exist
-        pairwise_prompts = st.session_state.pipeline_results.get("pairwise_prompt_templates", {})
-    
-    return parameter_prompts, pairwise_prompts
+# This tab shows the metrics and parameters and their prompts, and allows users to edit them one at a time
 
 def display_metrics_and_prompts(pipeline_results_for_display):
     """
