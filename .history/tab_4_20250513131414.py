@@ -1401,204 +1401,9 @@ def create_pairwise_download_section(results, filename_prefix="pairwise_evaluati
         </style>
     """, unsafe_allow_html=True)
 
-
-
-def run_pairwise_batch_evaluations(client, evaluation_model, pairwise_prompts, data_rows, 
-                                 is_conversation, input_col, output_a_col, output_b_col,
-                                 reduce_order_bias=False, batch_size=5):
-    """
-    Run pairwise evaluations in small batches, updating session state and showing
-    progress after each batch. Includes heartbeat to keep session alive.
-    
-    Parameters:
-    - client: API client
-    - evaluation_model: Model to use for evaluations (e.g., "gpt-4o-2024-05-13")
-    - pairwise_prompts: Dictionary of prompt templates
-    - data_rows: List of data rows to evaluate
-    - is_conversation: Boolean indicating if this is a conversation evaluation
-    - input_col: Column name for input text
-    - output_a_col: Column name for output A
-    - output_b_col: Column name for output B
-    - reduce_order_bias: Whether to run A vs B and B vs A comparisons
-    - batch_size: Number of rows to process in each batch (default: 5)
-    """
-    import time
-    import datetime
-    
-    # Create placeholders for status updates
-    status_placeholder = st.empty()
-    batch_progress = st.empty()
-    heartbeat_placeholder = st.empty()
-    results_placeholder = st.empty()
-    
-    # Initialize session state for batch processing
-    if "batch_results" not in st.session_state:
-        st.session_state.batch_results = []
-    
-    # Initialize heartbeat timestamp
-    last_heartbeat = time.time()
-    
-    # Determine starting point based on existing progress
-    if st.session_state.batch_results:
-        # Resume from where we left off
-        results = st.session_state.batch_results
-        processed_rows = len(results)
-        start_idx = processed_rows
-        status_placeholder.info(f"Resuming from row {start_idx+1} of {len(data_rows)}")
-    else:
-        # Start from the beginning
-        results = []
-        start_idx = 0
-    
-    # Calculate total evaluations for progress tracking
-    evals_per_row = len(pairwise_prompts)
-    if reduce_order_bias:
-        evals_per_row *= 2  # Double for A/B and B/A comparisons
-    
-    total_rows = len(data_rows)
-    total_evals = total_rows * evals_per_row
-    completed_evals = start_idx * evals_per_row
-    
-    # Main processing loop
-    try:
-        # Process in batches
-        for batch_start in range(start_idx, total_rows, batch_size):
-            # Update heartbeat if needed (every 60 seconds)
-            current_time = time.time()
-            if current_time - last_heartbeat > 60:
-                heartbeat_message = f"Heartbeat: {datetime.datetime.now().strftime('%H:%M:%S')}"
-                heartbeat_placeholder.info(heartbeat_message)
-                last_heartbeat = current_time
-            
-            # Get the current batch
-            batch_end = min(batch_start + batch_size, total_rows)
-            current_batch = data_rows[batch_start:batch_end]
-            
-            # Show batch progress
-            status_placeholder.info(f"Processing rows {batch_start+1}-{batch_end} of {total_rows}")
-            
-            # Create batch progress bar
-            batch_progress_bar = batch_progress.progress(0, text=f"Starting batch {batch_start//batch_size + 1}...")
-            
-            # Process each row in the current batch
-            batch_results = []
-            for i, row in enumerate(current_batch):
-                row_index = batch_start + i
-                row_results = {"row_index": row_index}
-                
-                # Get input and outputs from the row
-                input_text = row[input_col] if input_col else ""
-                output_a_text = row[output_a_col] if output_a_col else ""
-                output_b_text = row[output_b_col] if output_b_col else ""
-                
-                # Skip if missing required data
-                if (not is_conversation and (not input_text or not output_a_text or not output_b_text)) or \
-                   (is_conversation and (not output_a_text or not output_b_text)):
-                    row_results["status"] = "skipped"
-                    row_results["reason"] = "Missing required data"
-                    batch_results.append(row_results)
-                    continue
-                
-                row_results["evals"] = {}
-                
-                # Update batch progress
-                batch_progress_bar.progress((i+1) / len(current_batch), 
-                                          text=f"Row {row_index+1}/{total_rows}")
-                
-                # Process each prompt for this row
-                for prompt_key, prompt_template in pairwise_prompts.items():
-                    # First evaluation: A vs B
-                    if is_conversation:
-                        formatted_prompt = prompt_template.replace("{conversation_a}", output_a_text).replace("{conversation_b}", output_b_text)
-                    else:
-                        formatted_prompt = prompt_template.replace("{input}", input_text).replace("{output_a}", output_a_text).replace("{output_b}", output_b_text)
-                    
-                    # Run the first evaluation (A vs B)
-                    ab_result = run_pairwise_evaluation_with_client(client, evaluation_model, formatted_prompt, {
-                        "input": input_text,
-                        "output_a": output_a_text,
-                        "output_b": output_b_text
-                    })
-                    
-                    # Update completed evaluations count
-                    completed_evals += 1
-                    
-                    # Run second evaluation if reducing order bias
-                    ba_result = None
-                    if reduce_order_bias:
-                        # B vs A (reversed order)
-                        if is_conversation:
-                            formatted_prompt_reversed = prompt_template.replace("{conversation_a}", output_b_text).replace("{conversation_b}", output_a_text)
-                        else:
-                            formatted_prompt_reversed = prompt_template.replace("{input}", input_text).replace("{output_a}", output_b_text).replace("{output_b}", output_a_text)
-                        
-                        # Run the second evaluation (B vs A)
-                        ba_result = run_pairwise_evaluation_with_client(client, evaluation_model, formatted_prompt_reversed, {
-                            "input": input_text,
-                            "output_a": output_b_text,
-                            "output_b": output_a_text
-                        })
-                        
-                        # Update completed evaluations count
-                        completed_evals += 1
-                        
-                        # Combine results
-                        combined_result = combine_pairwise_results(ab_result, ba_result)
-                        row_results["evals"][prompt_key] = {
-                            "ab_result": ab_result,
-                            "ba_result": ba_result,
-                            "combined_result": combined_result
-                        }
-                    else:
-                        # Store single evaluation result
-                        row_results["evals"][prompt_key] = ab_result
-                
-                # Add row results to batch
-                batch_results.append(row_results)
-            
-            # Add batch results to overall results
-            results.extend(batch_results)
-            
-            # Update session state with current results
-            st.session_state.batch_results = results
-            
-            # Display interim results after each batch
-            with results_placeholder.container():
-                st.subheader("Interim Results")
-                st.write(f"Processed {len(results)} of {total_rows} rows")
-                
-                # Display a summary of the interim results
-                display_batch_summary(results, list(pairwise_prompts.keys()), reduce_order_bias)
-            
-            # Short pause to let UI update
-            time.sleep(0.5)
-        
-        # Clear session state once all processing is complete
-        st.session_state.batch_results = []
-        
-        # Clear placeholders
-        status_placeholder.empty()
-        batch_progress.empty()
-        heartbeat_placeholder.empty()
-        results_placeholder.empty()
-        
-        # Return final results
-        return results
-        
-    except Exception as e:
-        # Save progress in session state
-        st.session_state.batch_results = results
-        
-        # Show error with context
-        error_msg = f"Error during processing at row {row_index if 'row_index' in locals() else 'unknown'}: {str(e)}"
-        status_placeholder.error(error_msg)
-        
-        # Re-raise exception
-        raise Exception(error_msg)
-
 def run_batch_pairwise_evaluations_with_checkpoints(client, evaluation_model, pairwise_prompts, data_rows, 
                                            is_conversation, input_col, output_a_col, output_b_col, 
-                                           reduce_order_bias=False, progress_bar=None, batch_size=50):
+                                           reduce_order_bias=False, progress_bar=None, batch_size=100):
     """
     Run batch pairwise evaluations on multiple rows of data in smaller batches with checkpointing
     to avoid Streamlit session state issues with large datasets.
@@ -1608,43 +1413,17 @@ def run_batch_pairwise_evaluations_with_checkpoints(client, evaluation_model, pa
     """
     import time
     
-    # Create placeholders for status updates - key for keeping session alive
-    status_placeholder = st.empty()
-    batch_progress = st.empty()
-    heartbeat_placeholder = st.empty()
-    
-    # Initialize session state for results by batch if needed
-    if "results_by_batch" not in st.session_state:
-        st.session_state.results_by_batch = {}
-    
-    # Determine starting point based on existing progress
-    if st.session_state.get("is_eval_in_progress", False) and st.session_state.results_by_batch:
-        # Get completed batches and consolidate results
-        results = []
-        completed_batch_ids = sorted([int(k) for k in st.session_state.results_by_batch.keys()])
-        
-        if completed_batch_ids:
-            for batch_id in completed_batch_ids:
-                results.extend(st.session_state.results_by_batch[str(batch_id)])
-            
-            last_completed_batch = max(completed_batch_ids)
-            start_idx = (last_completed_batch + 1) * batch_size
-            start_idx = min(start_idx, len(data_rows))  # Ensure we don't go past the end
-            
-            status_placeholder.info(f"Resuming from batch {last_completed_batch + 2}, row {start_idx+1}")
-        else:
-            results = []
-            start_idx = 0
+    # Initialize results array - check if we have partial results to resume from
+    if "partial_eval_results" in st.session_state and st.session_state.get("is_eval_in_progress", False):
+        results = st.session_state.partial_eval_results
+        start_idx = len(results)
+        st.info(f"Resuming from batch {start_idx // batch_size + 1}, row {start_idx}")
     else:
-        # Fresh start
         results = []
         start_idx = 0
-        # Reset batch results
-        st.session_state.results_by_batch = {}
-        st.session_state.last_heartbeat = time.time()
-    
-    # Flag that evaluation is in progress
-    st.session_state.is_eval_in_progress = True
+        # Initialize session state for tracking progress
+        st.session_state.partial_eval_results = []
+        st.session_state.is_eval_in_progress = True
     
     # Calculate total evaluations for progress tracking
     evals_per_row = len(pairwise_prompts)
@@ -1655,43 +1434,18 @@ def run_batch_pairwise_evaluations_with_checkpoints(client, evaluation_model, pa
     total_evals = total_rows * evals_per_row
     completed_evals = start_idx * evals_per_row
     
-    # Set up heartbeat function to keep session alive
-    def update_heartbeat():
-        current_time = time.time()
-        elapsed = current_time - st.session_state.get("last_heartbeat", current_time)
-        if elapsed > 10:  # Update heartbeat every 10 seconds
-            heartbeat_placeholder.text(f"Session heartbeat: active ({current_time:.0f})")
-            st.session_state.last_heartbeat = current_time
-            time.sleep(0.1)  # Small pause to ensure update is processed
-            heartbeat_placeholder.empty()  # Clear after updating
-    
     # Process in batches
     try:
-        total_batches = (total_rows + batch_size - 1) // batch_size
-        
-        for batch_idx, i in enumerate(range(start_idx, total_rows, batch_size), start=(start_idx // batch_size)):
-            batch_id = str(batch_idx)
+        for i in range(start_idx, total_rows, batch_size):
             batch_end = min(i + batch_size, total_rows)
             batch = data_rows[i:batch_end]
             
             # Show batch progress information
-            status_placeholder.info(f"Processing batch {batch_idx+1} of {total_batches} (rows {i+1}-{batch_end} of {total_rows})")
-            
-            # Update progress bar for this batch
-            if progress_bar:
-                progress_bar.progress(i / total_rows, 
-                                    text=f"Batch {batch_idx+1}/{total_batches}")
-            
-            # Create batch progress bar
-            batch_progress_bar = batch_progress.progress(0, 
-                                                        text=f"Starting batch {batch_idx+1}...")
+            st.info(f"Processing batch {i // batch_size + 1} of {(total_rows + batch_size - 1) // batch_size} (rows {i+1}-{batch_end} of {total_rows})")
             
             # Process each row in the current batch
             batch_results = []
             for j, row in enumerate(batch):
-                # Update heartbeat to keep session alive
-                update_heartbeat()
-                
                 row_results = {"row_index": i + j}
                 
                 # Get input and outputs from the row
@@ -1708,10 +1462,6 @@ def run_batch_pairwise_evaluations_with_checkpoints(client, evaluation_model, pa
                     continue
                 
                 row_results["evals"] = {}
-                
-                # Update batch progress
-                batch_progress_bar.progress((j+1) / len(batch), 
-                                          text=f"Row {i+j+1}/{batch_end} in batch {batch_idx+1}")
                 
                 # Process each pairwise prompt for this row
                 for prompt_key, prompt_template in pairwise_prompts.items():
@@ -1769,161 +1519,37 @@ def run_batch_pairwise_evaluations_with_checkpoints(client, evaluation_model, pa
                 
                 batch_results.append(row_results)
                 
-                # Save to session state every 10 rows within a batch for extra safety
-                if (j + 1) % 10 == 0 or j == len(batch) - 1:
-                    # Update our combined results
-                    combined_results = results.copy()
-                    combined_results.extend(batch_results)
-                    
-                    # Save complete results to main session state
-                    st.session_state.partial_eval_results = combined_results
-                    
-                    # Update heartbeat 
-                    update_heartbeat()
+                # Add a short sleep to avoid rate limits and give streamlit UI time to update
+                time.sleep(0.1)
             
-            # Save completed batch and extend overall results 
-            st.session_state.results_by_batch[batch_id] = batch_results
+            # Add batch results to overall results
             results.extend(batch_results)
+            
+            # Save progress after each batch
+            st.session_state.partial_eval_results = results
             
             # Show intermediate results if this isn't the final batch
             if batch_end < total_rows:
-                # DO NOT use an expander here - causes nested expander issues
-                # Instead use a simple header and container
-                st.markdown(f"### Intermediate Results (Processed {batch_end}/{total_rows} rows)")
+                # Create an expander for intermediate results
+                with st.expander(f"Intermediate Results (Processed {batch_end}/{total_rows} rows)", expanded=False):
+                    display_enhanced_pairwise_results(results, list(pairwise_prompts.keys()), reduce_order_bias)
                 
-                # Create a simplified version of results display that doesn't use expanders
-                display_batch_summary(results, list(pairwise_prompts.keys()), reduce_order_bias)
-                
-                # Give the user a chance to see progress
-                status_placeholder.success(f"✅ Completed batch {batch_idx+1} of {total_batches}")
-                
-                # Explicitly force a UI refresh by clearing placeholders
-                batch_progress.empty()
-                time.sleep(0.5)  # Short pause to let the UI catch up
+                # Give the user a chance to see progress or interrupt
+                time.sleep(1)
         
-        # Mark evaluation as complete and save final results
+        # Mark evaluation as complete
         st.session_state.is_eval_in_progress = False
-        st.session_state.pairwise_evaluation_results = results
-        
-        # Clean up temporary batch storage to save memory
-        if hasattr(st.session_state, 'results_by_batch'):
-            del st.session_state.results_by_batch
-        
-        # Clear placeholders
-        status_placeholder.empty()
-        batch_progress.empty()
-        heartbeat_placeholder.empty()
         
     except Exception as e:
         # Save the current progress on error
         st.session_state.partial_eval_results = results
-        
-        # Report the error with more context
-        error_msg = f"Error during batch {batch_idx+1}, row {i+j+1 if 'j' in locals() else i}: {str(e)}"
-        status_placeholder.error(error_msg)
-        
-        # Keep the batch data for resuming
-        raise Exception(error_msg)
+        raise e
     
     return results
-
-def display_batch_summary(results, prompt_keys, reduce_order_bias=False):
-    """
-    Display a simple summary of batch results without using expanders
-    to avoid nested expander issues with Streamlit
-    """
-    import pandas as pd
-    import json
-    
-    # Create a dataframe from the results for the summary table
-    rows = []
-    for result in results:
-        row_data = {"Row": result.get("row_index", "N/A")}
-        
-        if result.get("status") == "skipped":
-            row_data.update({prompt_key: "SKIPPED" for prompt_key in prompt_keys})
-            row_data["Reason"] = result.get("reason", "Unknown")
-        else:
-            for prompt_key in prompt_keys:
-                eval_result = result.get("evals", {}).get(prompt_key, "N/A")
-                
-                if reduce_order_bias:
-                    # For reduced order bias, we display the combined result
-                    try:
-                        if isinstance(eval_result, dict) and "combined_result" in eval_result:
-                            combined = eval_result["combined_result"]
-                            if isinstance(combined, dict) and "final_result" in combined:
-                                row_data[prompt_key] = combined["final_result"]
-                            else:
-                                row_data[prompt_key] = "See details"
-                        else:
-                            row_data[prompt_key] = "See details"
-                    except:
-                        row_data[prompt_key] = "See details"
-                else:
-                    # Parse the JSON result if possible (original single evaluation)
-                    try:
-                        if isinstance(eval_result, str):
-                            eval_data = json.loads(eval_result)
-                            if "winner" in eval_data:
-                                row_data[prompt_key] = eval_data["winner"]
-                            elif "preference" in eval_data:
-                                row_data[prompt_key] = eval_data["preference"]
-                            elif "result" in eval_data:
-                                row_data[prompt_key] = eval_data["result"]
-                            else:
-                                # Look for string containing "A is better", "B is better", or "Equivalent"
-                                for k, v in eval_data.items():
-                                    if isinstance(v, str) and any(phrase in v for phrase in ["A is better", "B is better", "Equivalent"]):
-                                        row_data[prompt_key] = v
-                                        break
-                                else:
-                                    row_data[prompt_key] = "See details"
-                        else:
-                            row_data[prompt_key] = "See details"
-                    except:
-                        row_data[prompt_key] = "See details"
-        
-        rows.append(row_data)
-    
-    # Create summary dataframe and display it
-    if rows:
-        results_df = pd.DataFrame(rows)
-        st.dataframe(results_df)
-        
-        # Count results by category
-        a_wins = 0
-        b_wins = 0
-        tied = 0
-        skipped = 0
-        
-        for row in rows:
-            for key in row:
-                if key not in ["Row", "Reason"]:
-                    result = str(row[key]).lower()
-                    if "a win" in result or result == "a is better" or result == "a":
-                        a_wins += 1
-                    elif "b win" in result or result == "b is better" or result == "b":
-                        b_wins += 1
-                    elif "tie" in result or "equivalent" in result or "equal" in result:
-                        tied += 1
-                    else:
-                        skipped += 1
-        
-        # Display summary
-        st.markdown("#### Current Results Summary:")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("A Wins", a_wins)
-        col2.metric("B Wins", b_wins)
-        col3.metric("Tied", tied)
-        col4.metric("Skipped/Pending", skipped)
-    else:
-        st.info("No evaluation results to display yet.")
 
 def add_tab4_content_with_batching():
     """
     Modified version of add_tab4_content that uses batched evaluation
-    with robust session state handling for reliable processing of large datasets
     """
     import pandas as pd
     import json
@@ -1963,32 +1589,12 @@ def add_tab4_content_with_batching():
     
     # Check if an evaluation is in progress
     is_eval_in_progress = st.session_state.get("is_eval_in_progress", False)
-    has_partial_results = ("partial_eval_results" in st.session_state and 
-                            st.session_state.partial_eval_results and
-                            len(st.session_state.partial_eval_results) > 0)
-    
-    if is_eval_in_progress and has_partial_results:
-        # Create a colored info box with resume option
-        st.warning(
-            f"""**Evaluation In Progress**  
-            You have an unfinished evaluation with {len(st.session_state.partial_eval_results)} rows processed.  
-            You can continue or reset below."""
-        )
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("✅ Resume Evaluation", key="resume_eval"):
-                # Will be handled in the main processing section
-                st.rerun()
-        with col2:
-            if st.button("❌ Reset and Start New", key="reset_eval"):
-                # Clear all evaluation state
-                if "results_by_batch" in st.session_state:
-                    del st.session_state.results_by_batch
-                if "partial_eval_results" in st.session_state:
-                    del st.session_state.partial_eval_results
-                st.session_state.is_eval_in_progress = False
-                st.rerun()
+    if is_eval_in_progress:
+        st.warning("An evaluation is currently in progress. You can continue it or reset.")
+        if st.button("Reset and Start New Evaluation"):
+            st.session_state.is_eval_in_progress = False
+            st.session_state.partial_eval_results = []
+            st.rerun()  # Reload the page
     
     # File upload section
     st.subheader("Upload Your Data")
@@ -2089,21 +1695,15 @@ def add_tab4_content_with_batching():
                     key="pairwise_sample"
                 )
             
-            # Batch size selector - Set conservative default (50 rows)
+            # Batch size selector
             batch_size = st.slider(
                 "Batch Size", 
-                min_value=10, 
-                max_value=200, 
-                value=50, 
-                step=10,
-                help="Number of rows to process before saving progress. Smaller batches are safer for long runs but may be slower."
+                min_value=5, 
+                max_value=100, 
+                value=10, 
+                step=5,
+                help="Number of rows to process before saving progress. Smaller batches are safer for long runs."
             )
-            
-            # Add a note about optimal batch size based on dataset size
-            if len(df) > 1000:
-                st.info("ℹ️ For large datasets (1000+ rows), smaller batch sizes (20-30) are recommended for stability.")
-            elif len(df) > 100:
-                st.info("ℹ️ For medium datasets, the default batch size of 50 provides a good balance of speed and stability.")
             
             # Order bias reduction option
             reduce_order_bias = st.checkbox(
@@ -2124,11 +1724,7 @@ def add_tab4_content_with_batching():
                 st.warning("Please select at least one metric parameter to evaluate.")
             else:
                 # Run evaluations button
-                eval_button_text = "Run Pairwise Evaluations"
-                if is_eval_in_progress and has_partial_results:
-                    eval_button_text = "Continue Evaluation"
-                
-                if st.button(eval_button_text, use_container_width=True, type="primary"):
+                if st.button("Run Pairwise Evaluations"):
                     # Check if we have an API client
                     if not st.session_state.client:
                         st.error("Please set up your API key in the sidebar first.")
@@ -2146,17 +1742,7 @@ def add_tab4_content_with_batching():
                         data_to_evaluate = random.sample(data_to_evaluate, sample_size)
                     
                     # Create a progress bar
-                    progress_container = st.container()
-                    with progress_container:
-                        progress_bar = st.progress(0, text="Starting pairwise evaluations...")
-                    
-                    # Save selected metrics to session state for resumption
-                    st.session_state.current_eval_metrics = selected_metrics
-                    st.session_state.current_eval_is_conversation = is_conversation
-                    st.session_state.current_eval_input_col = input_col
-                    st.session_state.current_eval_output_a_col = output_a_col  
-                    st.session_state.current_eval_output_b_col = output_b_col
-                    st.session_state.current_eval_reduce_bias = reduce_order_bias
+                    progress_bar = st.progress(0, text="Starting pairwise evaluations...")
                     
                     # Run evaluations with batching
                     try:
@@ -2175,7 +1761,7 @@ def add_tab4_content_with_batching():
                                 batch_size=batch_size
                             )
                         
-                        st.success(f"✅ Pairwise evaluations completed for {len(results)} rows!")
+                        st.success(f"Pairwise evaluations completed for {len(results)} rows!")
                         
                         # Store results in session state
                         st.session_state.pairwise_evaluation_results = results
@@ -2186,33 +1772,30 @@ def add_tab4_content_with_batching():
                         display_enhanced_pairwise_results(results, list(selected_metrics.keys()), reduce_order_bias)
                         
                     except Exception as e:
-                        st.error(f"Error running pairwise evaluations: {str(e)}")
+                        st.error(f"Error running pairwise evaluations: {e}")
                         
                         # Provide resume option
                         if "partial_eval_results" in st.session_state and len(st.session_state.partial_eval_results) > 0:
                             st.warning(f"Evaluation was interrupted after processing {len(st.session_state.partial_eval_results)} rows. You can resume from this point.")
                             
-                            # Option to view partial results
-                            if st.button("👁️ View Partial Results"):
+                            # Show partial results
+                            if st.button("Show Partial Results"):
                                 st.subheader("Partial Evaluation Results")
-                                # Use the non-expander version to avoid nesting issues
-                                display_batch_summary(
+                                display_enhanced_pairwise_results(
                                     st.session_state.partial_eval_results, 
                                     list(selected_metrics.keys()),
                                     reduce_order_bias
                                 )
-                                
-                                # Option to download partial results
-                                if st.button("💾 Download Partial Results", key="dl_partial"):
-                                    # Use the download function here
-                                    create_pairwise_download_section(
-                                        st.session_state.partial_eval_results, 
-                                        "partial_pairwise_results"
-                                    )
                     finally:
                         # Complete the progress bar
-                        if 'progress_bar' in locals():
-                            progress_bar.progress(1.0, text="Pairwise evaluations completed or paused!")
+                        progress_bar.progress(1.0, text="Pairwise evaluations completed or paused!")
+
+                # Add a resume button if there's a paused evaluation
+                if is_eval_in_progress and "partial_eval_results" in st.session_state:
+                    if st.button("Resume Unfinished Evaluation"):
+                        # Run the same code as above, but it will resume from the checkpoint
+                        # Instead of duplicating code, we'll just rerun the page which will show the resume UI
+                        st.rerun()
 
     # Check if we have results to show
     elif "pairwise_evaluation_results" in st.session_state and st.session_state.pairwise_evaluation_results:
@@ -2229,7 +1812,6 @@ def add_tab4_content_with_batching():
             selected_metrics,
             reduce_order_bias
         )
-
 
 def add_tab4_content():
     """
@@ -2458,559 +2040,3 @@ def add_tab4_content():
             selected_metrics,
             reduce_order_bias
         )
-
-
-def run_pairwise_batch_evaluations(client, evaluation_model, pairwise_prompts, data_rows, 
-                                 is_conversation, input_col, output_a_col, output_b_col,
-                                 reduce_order_bias=False, batch_size=5):
-    """
-    Run pairwise evaluations in small batches, updating session state and showing
-    progress after each batch. Includes heartbeat to keep session alive.
-    
-    Parameters:
-    - client: API client
-    - evaluation_model: Model to use for evaluations (e.g., "gpt-4o-2024-05-13")
-    - pairwise_prompts: Dictionary of prompt templates
-    - data_rows: List of data rows to evaluate
-    - is_conversation: Boolean indicating if this is a conversation evaluation
-    - input_col: Column name for input text
-    - output_a_col: Column name for output A
-    - output_b_col: Column name for output B
-    - reduce_order_bias: Whether to run A vs B and B vs A comparisons
-    - batch_size: Number of rows to process in each batch (default: 5)
-    """
-    import time
-    import datetime
-    
-    # Create placeholders for status updates
-    status_placeholder = st.empty()
-    batch_progress = st.empty()
-    heartbeat_placeholder = st.empty()
-    results_placeholder = st.empty()
-    
-    # Initialize session state for batch processing
-    if "batch_results" not in st.session_state:
-        st.session_state.batch_results = []
-    
-    # Initialize heartbeat timestamp
-    last_heartbeat = time.time()
-    
-    # Determine starting point based on existing progress
-    if st.session_state.batch_results:
-        # Resume from where we left off
-        results = st.session_state.batch_results
-        processed_rows = len(results)
-        start_idx = processed_rows
-        status_placeholder.info(f"Resuming from row {start_idx+1} of {len(data_rows)}")
-    else:
-        # Start from the beginning
-        results = []
-        start_idx = 0
-    
-    # Calculate total evaluations for progress tracking
-    evals_per_row = len(pairwise_prompts)
-    if reduce_order_bias:
-        evals_per_row *= 2  # Double for A/B and B/A comparisons
-    
-    total_rows = len(data_rows)
-    total_evals = total_rows * evals_per_row
-    completed_evals = start_idx * evals_per_row
-    
-    # Main processing loop
-    try:
-        # Process in batches
-        for batch_start in range(start_idx, total_rows, batch_size):
-            # Update heartbeat if needed (every 60 seconds)
-            current_time = time.time()
-            if current_time - last_heartbeat > 60:
-                heartbeat_message = f"Heartbeat: {datetime.datetime.now().strftime('%H:%M:%S')}"
-                heartbeat_placeholder.info(heartbeat_message)
-                last_heartbeat = current_time
-            
-            # Get the current batch
-            batch_end = min(batch_start + batch_size, total_rows)
-            current_batch = data_rows[batch_start:batch_end]
-            
-            # Show batch progress
-            status_placeholder.info(f"Processing rows {batch_start+1}-{batch_end} of {total_rows}")
-            
-            # Create batch progress bar
-            batch_progress_bar = batch_progress.progress(0, text=f"Starting batch {batch_start//batch_size + 1}...")
-            
-            # Process each row in the current batch
-            batch_results = []
-            for i, row in enumerate(current_batch):
-                row_index = batch_start + i
-                row_results = {"row_index": row_index}
-                
-                # Get input and outputs from the row
-                input_text = row[input_col] if input_col else ""
-                output_a_text = row[output_a_col] if output_a_col else ""
-                output_b_text = row[output_b_col] if output_b_col else ""
-                
-                # Skip if missing required data
-                if (not is_conversation and (not input_text or not output_a_text or not output_b_text)) or \
-                   (is_conversation and (not output_a_text or not output_b_text)):
-                    row_results["status"] = "skipped"
-                    row_results["reason"] = "Missing required data"
-                    batch_results.append(row_results)
-                    continue
-                
-                row_results["evals"] = {}
-                
-                # Update batch progress
-                batch_progress_bar.progress((i+1) / len(current_batch), 
-                                          text=f"Row {row_index+1}/{total_rows}")
-                
-                # Process each prompt for this row
-                for prompt_key, prompt_template in pairwise_prompts.items():
-                    # First evaluation: A vs B
-                    if is_conversation:
-                        formatted_prompt = prompt_template.replace("{conversation_a}", output_a_text).replace("{conversation_b}", output_b_text)
-                    else:
-                        formatted_prompt = prompt_template.replace("{input}", input_text).replace("{output_a}", output_a_text).replace("{output_b}", output_b_text)
-                    
-                    # Run the first evaluation (A vs B)
-                    ab_result = run_pairwise_evaluation_with_client(client, evaluation_model, formatted_prompt, {
-                        "input": input_text,
-                        "output_a": output_a_text,
-                        "output_b": output_b_text
-                    })
-                    
-                    # Update completed evaluations count
-                    completed_evals += 1
-                    
-                    # Run second evaluation if reducing order bias
-                    ba_result = None
-                    if reduce_order_bias:
-                        # B vs A (reversed order)
-                        if is_conversation:
-                            formatted_prompt_reversed = prompt_template.replace("{conversation_a}", output_b_text).replace("{conversation_b}", output_a_text)
-                        else:
-                            formatted_prompt_reversed = prompt_template.replace("{input}", input_text).replace("{output_a}", output_b_text).replace("{output_b}", output_a_text)
-                        
-                        # Run the second evaluation (B vs A)
-                        ba_result = run_pairwise_evaluation_with_client(client, evaluation_model, formatted_prompt_reversed, {
-                            "input": input_text,
-                            "output_a": output_b_text,
-                            "output_b": output_a_text
-                        })
-                        
-                        # Update completed evaluations count
-                        completed_evals += 1
-                        
-                        # Combine results
-                        combined_result = combine_pairwise_results(ab_result, ba_result)
-                        row_results["evals"][prompt_key] = {
-                            "ab_result": ab_result,
-                            "ba_result": ba_result,
-                            "combined_result": combined_result
-                        }
-                    else:
-                        # Store single evaluation result
-                        row_results["evals"][prompt_key] = ab_result
-                
-                # Add row results to batch
-                batch_results.append(row_results)
-            
-            # Add batch results to overall results
-            results.extend(batch_results)
-            
-            # Update session state with current results
-            st.session_state.batch_results = results
-            
-            # Display interim results after each batch
-            with results_placeholder.container():
-                st.subheader("Interim Results")
-                st.write(f"Processed {len(results)} of {total_rows} rows")
-                
-                # Display a summary of the interim results
-                display_batch_summary(results, list(pairwise_prompts.keys()), reduce_order_bias)
-            
-            # Short pause to let UI update
-            time.sleep(0.5)
-        
-        # Clear session state once all processing is complete
-        st.session_state.batch_results = []
-        
-        # Clear placeholders
-        status_placeholder.empty()
-        batch_progress.empty()
-        heartbeat_placeholder.empty()
-        results_placeholder.empty()
-        
-        # Return final results
-        return results
-        
-    except Exception as e:
-        # Save progress in session state
-        st.session_state.batch_results = results
-        
-        # Show error with context
-        error_msg = f"Error during processing at row {row_index if 'row_index' in locals() else 'unknown'}: {str(e)}"
-        status_placeholder.error(error_msg)
-        
-        # Re-raise exception
-        raise Exception(error_msg)
-
-
-def add_tab4_content_improved():
-    """
-    Improved Tab 4 implementation with better batch processing and UI feedback
-    """
-    st.header("Run Pairwise Evaluations on Your Data")
-    st.info("Upload a spreadsheet with paired outputs and compare them using your generated metrics.")
-    
-    # Check if metrics are available
-    if not st.session_state.pipeline_results:
-        st.warning("Please generate metrics in Tab 1 first before running pairwise evaluations.")
-        return
-    
-    # Get the current prompts
-    _, pairwise_prompts = get_current_prompts()
-    
-    # Display the number of available prompts
-    st.write(f"Using {len(pairwise_prompts)} pairwise evaluation templates.")
-    
-    # Get metrics and templates from session state
-    pipeline_results = st.session_state.pipeline_results
-    is_conversation = pipeline_results.get("is_conversation", False)
-    pairwise_templates = pipeline_results.get("pairwise_prompt_templates", {})
-    metrics_json = pipeline_results.get("metrics_json", {})
-    
-    # Determine metrics list structure
-    metrics_list = []
-    if isinstance(metrics_json, dict) and "metrics" in metrics_json:
-        metrics_list = metrics_json["metrics"]
-    elif isinstance(metrics_json, list):
-        metrics_list = metrics_json
-    
-    if not metrics_list:
-        st.warning("No metrics found in the results.")
-        return
-    
-    # Check if an evaluation is in progress
-    has_in_progress_eval = "batch_results" in st.session_state and len(st.session_state.batch_results) > 0
-    
-    if has_in_progress_eval:
-        # Create a colored info box with resume option
-        st.warning(
-            f"""**Evaluation In Progress**  
-            You have an unfinished evaluation with {len(st.session_state.batch_results)} rows processed.  
-            You can continue or reset below."""
-        )
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("✅ Resume Evaluation", key="resume_eval"):
-                # Will be handled in the main processing section
-                st.rerun()
-        with col2:
-            if st.button("❌ Reset and Start New", key="reset_eval"):
-                # Clear evaluation state
-                if "batch_results" in st.session_state:
-                    del st.session_state.batch_results
-                st.rerun()
-    
-    # File upload section
-    st.subheader("Upload Your Data")
-    uploaded_file = st.file_uploader(
-        "Upload a CSV, XLSX, or XLS file with paired outputs", 
-        type=["csv", "xlsx", "xls"],
-        key="pairwise_file_uploader"
-    )
-    
-    if uploaded_file is not None:
-        # Process the uploaded file
-        df = process_uploaded_file_pairwise(uploaded_file)
-        
-        if df is not None:
-            st.success(f"File uploaded successfully! {len(df)} rows found.")
-            
-            # Show a preview of the data
-            st.subheader("Data Preview")
-            st.dataframe(df.head())
-            
-            # Column selection based on conversation type
-            st.subheader("Column Mapping")
-            
-            # Get all column names
-            column_names = list(df.columns)
-            
-            if is_conversation:
-                st.info("This is a conversation evaluation. Please select columns for both conversation transcripts to compare.")
-                col1, col2 = st.columns(2)
-                with col1:
-                    conversation_a_col = st.selectbox("Conversation A Column", [""] + column_names, key="conv_a")
-                with col2:
-                    conversation_b_col = st.selectbox("Conversation B Column", [""] + column_names, key="conv_b")
-                input_col = None  # Not used for conversation
-                output_a_col = conversation_a_col
-                output_b_col = conversation_b_col
-            else:
-                st.info("This is a single-turn evaluation. Please select columns for input and both outputs to compare.")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    input_col = st.selectbox("Input Column", [""] + column_names, key="input_pairwise")
-                with col2:
-                    output_a_col = st.selectbox("Output A Column", [""] + column_names, key="output_a")
-                with col3:
-                    output_b_col = st.selectbox("Output B Column", [""] + column_names, key="output_b")
-            
-            # Metrics selection
-            st.subheader("Select Metrics to Evaluate")
-            
-            # Create a checkbox for each metric
-            selected_metrics = {}
-            for metric in metrics_list:
-                metric_name = metric.get("metric", "Unnamed Metric")
-                parameters = metric.get("parameters", [])
-                
-                # Create an expandable section for each metric
-                with st.expander(f"{metric_name} - {len(parameters)} parameters", expanded=True):
-                    # Show metric description
-                    st.markdown(f"**Description:** {metric.get('description', 'No description')}")
-                    
-                    # Create checkboxes for each parameter
-                    for param in parameters:
-                        if isinstance(param, dict) and len(param) > 0:
-                            param_key = list(param.keys())[0]
-                            param_description = param[param_key]
-                            prompt_key = f"{metric_name}::{param_key}"
-                            
-                            # Only show checkbox if we have a template for this parameter
-                            if prompt_key in pairwise_templates:
-                                is_selected = st.checkbox(
-                                    f"{param_key}: {param_description}", 
-                                    value=True,
-                                    key=f"pairwise_{prompt_key}"
-                                )
-                                if is_selected:
-                                    selected_metrics[prompt_key] = pairwise_templates[prompt_key]
-            
-            # Evaluation model and sample size selection
-            st.subheader("Evaluation Settings")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                eval_model = st.selectbox(
-                    "Evaluation Model", 
-                    ["gpt-4o-2024-05-13", "gpt-4o-mini-2024-07-18", "gpt-4.1-2025-04-14", "gpt-4.1-mini-2025-04-14","o3-mini-2025-01-31"], 
-                    index=0,
-                    help="Model used for running pairwise evaluations"
-                )
-            
-            with col2:
-                sample_size = st.number_input(
-                    "Sample Size (0 for all rows)", 
-                    min_value=0, 
-                    value=min(len(df), 5),
-                    help="Number of rows to evaluate (0 means all rows)"
-                )
-            
-            # Batch size - fixed at 5 as per requirements
-            batch_size = 5
-            st.info(f"Evaluations will be processed in batches of {batch_size} rows at a time with results updated after each batch.")
-            
-            # Order bias reduction option
-            reduce_order_bias = st.checkbox(
-                "Reduce Order Bias (Run A vs B and B vs A)", 
-                value=True,
-                help="Run each evaluation twice with A and B swapped to reduce position bias."
-            )
-            
-            if reduce_order_bias:
-                st.info("Order bias reduction doubles the number of evaluations but produces more reliable results.")
-            
-            # Check for required fields
-            form_valid = True
-            validation_message = ""
-            
-            if is_conversation and (not conversation_a_col or not conversation_b_col):
-                form_valid = False
-                validation_message = "Please select both conversation columns."
-            elif not is_conversation and (not input_col or not output_a_col or not output_b_col):
-                form_valid = False
-                validation_message = "Please select input, output A, and output B columns."
-            elif not selected_metrics:
-                form_valid = False
-                validation_message = "Please select at least one metric parameter to evaluate."
-            
-            if not form_valid:
-                st.warning(validation_message)
-            else:
-                # Run evaluations button
-                eval_button_text = "Run Pairwise Evaluations"
-                if has_in_progress_eval:
-                    eval_button_text = "Continue Evaluation"
-                
-                if st.button(eval_button_text, use_container_width=True, type="primary"):
-                    # Check if we have an API client
-                    if not st.session_state.client:
-                        st.error("Please set up your API key in the sidebar first.")
-                        return
-                    
-                    client = st.session_state.client
-                    
-                    # Prepare data for evaluation
-                    data_to_evaluate = df.to_dict('records')
-                    
-                    # Sample if needed
-                    if sample_size > 0 and sample_size < len(data_to_evaluate):
-                        import random
-                        random.seed(42)  # For reproducibility
-                        data_to_evaluate = random.sample(data_to_evaluate, sample_size)
-                    
-                    # Store evaluation parameters in session state for resumption
-                    st.session_state.eval_parameters = {
-                        "is_conversation": is_conversation,
-                        "input_col": input_col,
-                        "output_a_col": output_a_col,
-                        "output_b_col": output_b_col,
-                        "reduce_order_bias": reduce_order_bias,
-                        "selected_metrics": selected_metrics
-                    }
-                    
-                    # Run evaluations with improved batching
-                    try:
-                        with st.spinner("Running pairwise evaluations..."):
-                            results = run_pairwise_batch_evaluations(
-                                client=client,
-                                evaluation_model=eval_model,
-                                pairwise_prompts=selected_metrics,
-                                data_rows=data_to_evaluate,
-                                is_conversation=is_conversation,
-                                input_col=input_col,
-                                output_a_col=output_a_col,
-                                output_b_col=output_b_col,
-                                reduce_order_bias=reduce_order_bias,
-                                batch_size=batch_size
-                            )
-                        
-                        st.success(f"✅ Pairwise evaluations completed for {len(results)} rows!")
-                        
-                        # Store final results in session state
-                        st.session_state.pairwise_evaluation_results = results
-                        st.session_state.pairwise_reduce_order_bias = reduce_order_bias
-                        st.session_state.pairwise_selected_metrics = list(selected_metrics.keys())
-                        
-                        # Display final results
-                        display_enhanced_pairwise_results(results, list(selected_metrics.keys()), reduce_order_bias)
-                        
-                    except Exception as e:
-                        st.error(f"Error running pairwise evaluations: {str(e)}")
-                        
-                        # Provide details about resuming
-                        if "batch_results" in st.session_state and len(st.session_state.batch_results) > 0:
-                            st.info(f"You can resume the evaluation with the {len(st.session_state.batch_results)} rows already processed.")
-                
-    # Display previous results if available
-    elif "pairwise_evaluation_results" in st.session_state and st.session_state.pairwise_evaluation_results:
-        st.subheader("Previous Evaluation Results")
-        st.info("Showing results from your last completed evaluation. Upload a new file to run new evaluations.")
-        
-        # Get settings from session state
-        reduce_order_bias = st.session_state.get("pairwise_reduce_order_bias", False)
-        selected_metrics = st.session_state.get("pairwise_selected_metrics", [])
-        
-        # Display results
-        display_enhanced_pairwise_results(
-            st.session_state.pairwise_evaluation_results, 
-            selected_metrics,
-            reduce_order_bias
-        )
-
-
-def display_batch_summary(results, prompt_keys, reduce_order_bias=False):
-    """
-    Display a simple summary of batch results
-    """
-    import pandas as pd
-    import json
-    
-    # Create a dataframe from results
-    rows = []
-    for result in results:
-        row_data = {"Row": result.get("row_index", "N/A")}
-        
-        if result.get("status") == "skipped":
-            row_data.update({prompt_key: "SKIPPED" for prompt_key in prompt_keys})
-            row_data["Reason"] = result.get("reason", "Unknown")
-        else:
-            for prompt_key in prompt_keys:
-                eval_result = result.get("evals", {}).get(prompt_key, "N/A")
-                
-                # Extract result based on evaluation type
-                if reduce_order_bias:
-                    try:
-                        if isinstance(eval_result, dict) and "combined_result" in eval_result:
-                            combined = eval_result["combined_result"]
-                            if isinstance(combined, dict) and "final_result" in combined:
-                                row_data[prompt_key] = combined["final_result"]
-                            else:
-                                row_data[prompt_key] = "Processing..."
-                        else:
-                            row_data[prompt_key] = "Processing..."
-                    except:
-                        row_data[prompt_key] = "Error"
-                else:
-                    try:
-                        if isinstance(eval_result, str):
-                            # Try to parse JSON
-                            try:
-                                eval_data = json.loads(eval_result)
-                                if "winner" in eval_data:
-                                    row_data[prompt_key] = eval_data["winner"]
-                                elif "preference" in eval_data:
-                                    row_data[prompt_key] = eval_data["preference"]
-                                elif "result" in eval_data:
-                                    row_data[prompt_key] = eval_data["result"]
-                                else:
-                                    for k, v in eval_data.items():
-                                        if isinstance(v, str) and any(phrase in v for phrase in ["A is better", "B is better", "Equivalent"]):
-                                            row_data[prompt_key] = v
-                                            break
-                                    else:
-                                        row_data[prompt_key] = "Processing..."
-                            except:
-                                row_data[prompt_key] = "Processing..."
-                        else:
-                            row_data[prompt_key] = "Processing..."
-                    except:
-                        row_data[prompt_key] = "Error"
-        
-        rows.append(row_data)
-    
-    # Create and display summary dataframe
-    if rows:
-        results_df = pd.DataFrame(rows)
-        st.dataframe(results_df)
-        
-        # Count results by category
-        a_wins = 0
-        b_wins = 0
-        tied = 0
-        skipped = 0
-        
-        for row in rows:
-            for key in row:
-                if key not in ["Row", "Reason"]:
-                    result = str(row[key]).lower()
-                    if "a win" in result or result == "a is better" or result == "a":
-                        a_wins += 1
-                    elif "b win" in result or result == "b is better" or result == "b":
-                        b_wins += 1
-                    elif "tie" in result or "equivalent" in result or "equal" in result:
-                        tied += 1
-                    else:
-                        skipped += 1
-        
-        # Display metrics summary
-        st.markdown("#### Current Results Summary:")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("A Wins", a_wins)
-        col2.metric("B Wins", b_wins)
-        col3.metric("Tied", tied)
-        col4.metric("Skipped/Pending", skipped)
-    else:
-        st.info("No evaluation results to display yet.")

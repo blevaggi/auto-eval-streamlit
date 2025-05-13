@@ -1022,8 +1022,8 @@ Tone must be professional
         add_tab3_content()
     
     with tab4:
-        from tab_4 import add_tab4_content_improved
-        add_tab4_content_improved()
+        from tab_4 import add_tab4_content_with_batching
+        add_tab4_content_with_batching()
 
 
 if __name__ == "__main__":
