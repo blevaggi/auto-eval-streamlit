@@ -2806,7 +2806,7 @@ def add_tab4_content_improved():
                     min_value=0, 
                     value=min(len(df), 5),
                     help="Number of rows to evaluate (0 means all rows)",
-                    key="tab4_sample_size_number"
+                    key="tab4_sample_size"
                 )
             
             # Batch size - fixed at 5 as per requirements
