@@ -1050,8 +1050,8 @@ Tone must be professional
         add_tab3_content()
     
     with tab4:
-        from tab_4 import add_tab4_content_parallel
-        add_tab4_content_parallel()
+        from tab_4 import add_tab4_content_improved
+        add_tab4_content_improved()
 
 
 if __name__ == "__main__":

@@ -823,11 +823,10 @@ def main():
     # Sidebar: API configuration 
     with st.sidebar:
         st.header("GenAI API Configuration")
-        st.info("Using internal GenAI API - no keys required! But turn VPN on.")
+        st.info("Using internal GenAI API proxy - no API key required!")
         
         # Show available models with vendor info
         model_options = [
-            "o3-2025-04-16 (OpenAI)"
             "gpt-4o-2024-05-13 (OpenAI)",
             "gpt-4o-mini-2024-07-18 (OpenAI)", 
             "gpt-4.1-2025-04-14 (OpenAI)",
@@ -1050,8 +1049,8 @@ Tone must be professional
         add_tab3_content()
     
     with tab4:
-        from tab_4 import add_tab4_content_parallel
-        add_tab4_content_parallel()
+        from tab_4 import add_tab4_content_improved
+        add_tab4_content_improved()
 
 
 if __name__ == "__main__":

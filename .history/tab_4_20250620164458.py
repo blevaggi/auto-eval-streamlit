@@ -6,10 +6,6 @@ import json
 from tab_2 import get_current_prompts
 # TAB 4 is where the user can upload a file with LLM-generated inputs and two outputs, and see which is better for each auto-generated metric from Tab 1
 from genai_utils import create_client_with_model
-import concurrent.futures
-import threading
-import time
-from typing import Dict, List, Any
 
 # NEW:
 def read_csv_file(uploaded_file):
@@ -210,48 +206,23 @@ def combine_pairwise_results(ab_result, ba_result):
 
 def extract_winner(eval_data, reversed=False):
     """
-    Extract the winner from evaluation data with improved parsing
+    Extract the winner from evaluation data
     If reversed is True, swap A and B in the result
     """
     winner = "Equivalent"  # Default: no clear winner
     
     if isinstance(eval_data, dict):
-        # Check if there's an 'evaluation' sub-dict (like in your example)
-        if "evaluation" in eval_data and isinstance(eval_data["evaluation"], dict):
-            eval_data = eval_data["evaluation"]
-        
         # Try different possible keys where winner might be stored
-        possible_keys = [
-            "winner", "preference", "result", "evaluation", "comparison",
-            "better_satisfaction", "better_conversation", "better_response",
-            "better_option", "choice", "selection"
-        ]
-        
-        for key in possible_keys:
+        for key in ["winner", "preference", "result", "evaluation", "comparison"]:
             if key in eval_data and isinstance(eval_data[key], str):
                 value = eval_data[key].lower()
-                
-                # Check for various ways to express A wins
-                if any(phrase in value for phrase in [
-                    "a is better", "a wins", "option a", "conversation a", 
-                    "response a", "output a"
-                ]) or value.strip() == "a":
+                if "a is better" in value or "a wins" in value or value == "a":
                     winner = "A"
                     break
-                
-                # Check for various ways to express B wins  
-                elif any(phrase in value for phrase in [
-                    "b is better", "b wins", "option b", "conversation b",
-                    "response b", "output b"
-                ]) or value.strip() == "b":
+                elif "b is better" in value or "b wins" in value or value == "b":
                     winner = "B"
                     break
-                
-                # Check for equivalent/tie responses
-                elif any(phrase in value for phrase in [
-                    "equivalent", "equal", "tie", "same", "similar",
-                    "no clear winner", "both are"
-                ]):
+                elif "equivalent" in value or "equal" in value or "tie" in value or "same" in value:
                     winner = "Equivalent"
                     break
         
@@ -260,36 +231,20 @@ def extract_winner(eval_data, reversed=False):
             for _, value in eval_data.items():
                 if isinstance(value, str):
                     value = value.lower()
-                    if any(phrase in value for phrase in [
-                        "a is better", "a wins", "option a", "conversation a"
-                    ]) or value.strip() == "a":
+                    if "a is better" in value or "a wins" in value:
                         winner = "A"
                         break
-                    elif any(phrase in value for phrase in [
-                        "b is better", "b wins", "option b", "conversation b"
-                    ]) or value.strip() == "b":
+                    elif "b is better" in value or "b wins" in value:
                         winner = "B"
                         break
-                    elif any(phrase in value for phrase in [
-                        "equivalent", "equal", "tie", "same"
-                    ]):
-                        winner = "Equivalent"
-                        break
-                        
     elif isinstance(eval_data, str):
         # Try to extract from raw string
         eval_lower = eval_data.lower()
-        if any(phrase in eval_lower for phrase in [
-            "a is better", "a wins", "option a", "conversation a"
-        ]):
+        if "a is better" in eval_lower or "a wins" in eval_lower:
             winner = "A"
-        elif any(phrase in eval_lower for phrase in [
-            "b is better", "b wins", "option b", "conversation b"  
-        ]):
+        elif "b is better" in eval_lower or "b wins" in eval_lower:
             winner = "B"
-        elif any(phrase in eval_lower for phrase in [
-            "equivalent", "equal", "tie", "same"
-        ]):
+        elif "equivalent" in eval_lower or "equal" in eval_lower or "tie" in eval_lower:
             winner = "Equivalent"
     
     # If reversed, swap A and B

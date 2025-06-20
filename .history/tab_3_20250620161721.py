@@ -833,7 +833,7 @@ def add_tab3_content_parallel():
     - Full charts, radar plots, and detailed analysis
     - All the visualization power of the original Tab 3
     """
-    # st.header("Individual Evaluations (Parallel Processing)")
+    st.header("Individual Evaluations (Parallel Processing)")
     st.info("Upload a dataset to evaluate each output using the generated metrics. Processes rows in parallel with automatic saving between batches.")
     
     # Check if metrics are available

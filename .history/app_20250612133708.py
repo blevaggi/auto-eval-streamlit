@@ -11,8 +11,6 @@ import concurrent.futures
 from functools import partial
 import time
 import re
-from genai_utils import initialize_client, create_client_with_model, get_headers_for_model
-
 
 # ====== TAB 1 FUNCTIONS ========
 # This tab accepts the use case details, the API permissions, and generates the custom eval and prompt templates
@@ -27,6 +25,24 @@ st.set_page_config(
 )
 
 # STEP TWO: User fills out the sidebar with OpenAI permissions
+
+def initialize_client(api_key=None):
+    """Initialize with GenAI API client"""
+    # The api_key parameter is now optional since we use a placeholder
+    
+    # Set up GenAI API headers for tracking
+    gen_ai_api_headers = {
+        "X-Vendor": "openai",  # You can change this based on which vendor/model you're using
+        "X-Model": "gpt-4o-2024-05-13",  # Default model, can be overridden per request
+        "X-Source": "streamlit_eval_app",
+        "X-Usecase": "AutoEval_Pipeline_App",  # Format: Team_StoryId_UseCase
+    }
+    
+    return OpenAI(
+        base_url="http://generativeaiapi.stg.justanswer.local",
+        api_key="FAKE_API_KEY",  # Placeholder only - not used by proxy
+        default_headers=gen_ai_api_headers
+    )
 
 # STEP THREE: User gives us information about their evaluation use case
 
@@ -87,10 +103,7 @@ def detect_conversation_type(client, input_package: Dict, model: str) -> Dict:
         - "evaluation_structure": either "conversation" or "input_output"
         """
         
-        # Create client with model-specific headers
-        model_client = create_client_with_model(model)
-        
-        response = model_client.chat.completions.create(
+        response = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system_message},
@@ -155,8 +168,6 @@ def generate_eval_metrics(client, input_package: Dict, model: str) -> List[Dict]
         ]
         }'''
     
-    # Create client with model-specific headers
-    model_client = create_client_with_model(model)
     
     # Start with an initial generation
     with st.spinner("Generating customized eval metrics..."):
@@ -191,7 +202,7 @@ def generate_eval_metrics(client, input_package: Dict, model: str) -> List[Dict]
         
         """
 
-        response_1 = model_client.chat.completions.create(
+        response_1 = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system_message},
@@ -203,6 +214,8 @@ def generate_eval_metrics(client, input_package: Dict, model: str) -> List[Dict]
         
         # Display preliminary results
         with st.expander("Initial Eval Metrics:"):
+            # st.write(initial_how_metrics)
+            # st.code(initial_how_metrics, language="json")
             st.json(initial_eval_metrics)
         
         # Then remove redundancies from the preliminary list
@@ -215,7 +228,7 @@ def generate_eval_metrics(client, input_package: Dict, model: str) -> List[Dict]
         Return a revised version of the JSON package with any redundancies removed. 
         """
 
-        response_2 = model_client.chat.completions.create(
+        response_2 = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system_message},
@@ -229,10 +242,10 @@ def generate_eval_metrics(client, input_package: Dict, model: str) -> List[Dict]
 
         # Display final results
         with st.expander("Final Eval Metrics with redundancies removed"):
+            # st.write(final_how_metrics)
             st.json(final_eval_metrics)
         
         return final_eval_metrics
-
 
 def generate_kshot_examples(client, input_package, metric_name, param_key, param_description, is_conversation, model):
     """
@@ -280,10 +293,7 @@ def generate_kshot_examples(client, input_package, metric_name, param_key, param
     """
     
     try:
-        # Create client with model-specific headers
-        model_client = create_client_with_model(model)
-        
-        response = model_client.chat.completions.create(
+        response = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system_message},
@@ -790,6 +800,39 @@ def load_metrics_from_file():
     return None
 
 
+def get_headers_for_model(model_name):
+    """
+    Generate appropriate headers for the GenAI API based on the model being used
+    """
+    # Extract vendor from model name
+    if "gpt" in model_name.lower() or "o1" in model_name.lower() or "o3" in model_name.lower():
+        vendor = "openai"
+    elif "claude" in model_name.lower():
+        vendor = "anthropic" 
+    elif "gemini" in model_name.lower():
+        vendor = "google"
+    else:
+        vendor = "openai"  # Default fallback
+    
+    return {
+        "X-Vendor": vendor,
+        "X-Model": model_name,
+        "X-Source": "streamlit_eval_app",
+        "X-Usecase": "AutoEval_Pipeline_App",
+    }
+
+def create_client_with_model(model_name):
+    """
+    Create an OpenAI client with headers set for the specific model
+    """
+    headers = get_headers_for_model(model_name)
+    
+    return OpenAI(
+        base_url="http://generativeaiapi.stg.justanswer.local",
+        api_key="FAKE_API_KEY",
+        default_headers=headers
+    )
+
 
 # ====== TAB 3 FUNCTIONS ========
 
@@ -820,47 +863,22 @@ def main():
     st.text("This tool will help you identify the right eval metrics for your use case automatically using chained reasoning LLMs. Within this same tool you can upload outputs that you already generated somewhere else, run evaluation on them, and visualzie the results. ")
 
     # Sidebar: API configuration and new Evaluation Mode toggle.
-    # Sidebar: API configuration 
     with st.sidebar:
-        st.header("GenAI API Configuration")
-        st.info("Using internal GenAI API - no keys required! But turn VPN on.")
-        
-        # Show available models with vendor info
-        model_options = [
-            "o3-2025-04-16 (OpenAI)"
-            "gpt-4o-2024-05-13 (OpenAI)",
-            "gpt-4o-mini-2024-07-18 (OpenAI)", 
-            "gpt-4.1-2025-04-14 (OpenAI)",
-            "gpt-4.1-mini-2025-04-14 (OpenAI)",
-            "o3-mini-2025-01-31 (OpenAI)"
-        ]
-        
-        selected_model = st.selectbox(
-            "Metric Generation Model", 
-            model_options, 
-            index=0,
-            help="Model used for generating metrics and customizing rubrics"
-        )
-        
-        # Extract just the model name (remove vendor info)
-        model = selected_model.split(" (")[0]
+        st.header("API Configuration")
+        api_key = st.text_input("OpenAI API Key", type="password")
+        model = st.selectbox(
+    "Metric Generation Model", 
+    ["gpt-4o-2024-05-13", "gpt-4o-mini-2024-07-18", "gpt-4.1-2025-04-14", "gpt-4.1-mini-2025-04-14", "o3-mini-2025-01-31"], 
+    index=0,
+    help="Model used for generating metrics and customizing rubrics"
+)
 
-        if st.button("💾 Initialize GenAI Client"):
-            st.session_state.client = initialize_client()
+        # # And update the save button section:
+        if st.button("💾 Click to save your key!"):
+            # For GenAI API, we don't actually need the key, but keep the flow for user experience
+            st.session_state.client = initialize_client()  # Remove api_key parameter
             st.session_state.model = model
-            st.success("GenAI API client initialized!")
-            
-            # Show which headers will be used
-            headers = get_headers_for_model(model)
-            with st.expander("API Headers", expanded=False):
-                st.json(headers)
-        
-        # Show connection status
-        if st.session_state.get('client'):
-            st.success("✅ GenAI API Connected")
-            st.write(f"📋 Model: {st.session_state.get('model', 'Not set')}")
-        else:
-            st.warning("⚠️ GenAI API Not Connected")
+            st.success("Configuration saved! Using internal GenAI API.")
 
     tab1, tab2, tab3, tab4  = st.tabs(["Generate Eval Metrics", "Review Each Metric", "Individual Eval", "Pairwise Eval"])
         
@@ -980,23 +998,17 @@ Tone must be professional
         st.subheader("Run Pipeline", divider=True)
         if st.button("Generate Customized Metrics"):
             
-            # FIXED: Check if we have a connected client instead of api_key
-            if not st.session_state.get('client'):
-                st.error("Please initialize the GenAI client in the sidebar first.")
+            if not api_key:
+                st.error("Please provide an API key in the sidebar first.")
             elif not requirements:
                 st.error("Task requirements are required.")
             else:
-                # FIXED: Use the client from session state, no need to pass api_key
-                client = st.session_state.client
+                client = initialize_client(api_key)
                 model_used = st.session_state.model
-                
-                # Parse requirements into a list
-                requirements_list = [req.strip() for req in requirements.split('\n') if req.strip()]
-                
                 with st.spinner("Processing..."):
                     st.session_state.pipeline_results = setup_evaluation_config(
                         task_summary=task_summary,
-                        requirements=requirements_list,  # FIXED: Pass as list
+                        requirements=requirements,
                         sample_input=sample_input,
                         good_examples=good_examples_list,
                         bad_examples=bad_examples_list,
@@ -1045,13 +1057,13 @@ Tone must be professional
 
     with tab3:
         st.header("Individual Evaluations")
-        # Use parallel processing by default
-        from tab_3 import add_tab3_content_parallel as add_tab3_content
+        st.info("Upload a dataset to evaluate each output using the generated metrics")
+        from tab_3 import add_tab3_content
         add_tab3_content()
     
     with tab4:
-        from tab_4 import add_tab4_content_parallel
-        add_tab4_content_parallel()
+        from tab_4 import add_tab4_content_improved
+        add_tab4_content_improved()
 
 
 if __name__ == "__main__":

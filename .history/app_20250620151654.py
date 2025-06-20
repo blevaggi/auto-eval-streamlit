@@ -823,11 +823,10 @@ def main():
     # Sidebar: API configuration 
     with st.sidebar:
         st.header("GenAI API Configuration")
-        st.info("Using internal GenAI API - no keys required! But turn VPN on.")
+        st.info("Using internal GenAI API proxy - no API key required!")
         
         # Show available models with vendor info
         model_options = [
-            "o3-2025-04-16 (OpenAI)"
             "gpt-4o-2024-05-13 (OpenAI)",
             "gpt-4o-mini-2024-07-18 (OpenAI)", 
             "gpt-4.1-2025-04-14 (OpenAI)",
@@ -1045,13 +1044,25 @@ Tone must be professional
 
     with tab3:
         st.header("Individual Evaluations")
-        # Use parallel processing by default
-        from tab_3 import add_tab3_content_parallel as add_tab3_content
-        add_tab3_content()
+        st.info("Upload a dataset to evaluate each output using the generated metrics")
+        
+        # Give users choice between parallel and regular processing
+        processing_mode = st.radio(
+            "Choose processing mode:",
+            ["🚀 Parallel Processing (Recommended for large datasets)", "📊 Standard Processing (Full visualization)"],
+            help="Parallel processing is faster and more reliable for large datasets. Standard processing has full charts and analysis."
+        )
+        
+        if "Parallel" in processing_mode:
+            from tab_3 import add_tab3_content_parallel
+            add_tab3_content_parallel()
+        else:
+            from tab_3 import add_tab3_content
+            add_tab3_content()
     
     with tab4:
-        from tab_4 import add_tab4_content_parallel
-        add_tab4_content_parallel()
+        from tab_4 import add_tab4_content_improved
+        add_tab4_content_improved()
 
 
 if __name__ == "__main__":

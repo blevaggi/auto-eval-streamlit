@@ -11,7 +11,7 @@ import threading
 import time
 from typing import Dict, List, Any
 
-# ====== ENHANCED TAB 3 WITH PARALLEL PROCESSING + FULL VISUALIZATIONS ========
+# ====== ENHANCED TAB 3 WITH PARALLEL PROCESSING ========
 
 def run_single_evaluation_threadsafe(client, model, eval_prompt, data_to_evaluate, row_index, prompt_key):
     """
@@ -37,547 +37,6 @@ def run_single_evaluation_threadsafe(client, model, eval_prompt, data_to_evaluat
         return (row_index, prompt_key, response.choices[0].message.content)
     except Exception as e:
         return (row_index, prompt_key, {"error": str(e), "status": "failed"})
-
-
-# ====== COPIED VISUALIZATION FUNCTIONS FROM ORIGINAL TAB_3.PY ========
-
-def calculate_average_scores(results, prompt_keys):
-    """
-    Calculate average scores for each metric and output column
-    """
-    averages = {}
-    
-    for output_col, output_results in results.items():
-        averages[output_col] = {}
-        
-        for prompt_key in prompt_keys:
-            scores = []
-            
-            for result in output_results:
-                if result.get("status") != "skipped":
-                    eval_result = result.get("evals", {}).get(prompt_key, "N/A")
-                    
-                    # Parse the JSON result if possible
-                    try:
-                        if isinstance(eval_result, str):
-                            eval_data = json.loads(eval_result)
-                            if "score" in eval_data:
-                                scores.append(float(eval_data["score"]))
-                            else:
-                                # Try to find any numeric value
-                                for k, v in eval_data.items():
-                                    if isinstance(v, (int, float)):
-                                        scores.append(float(v))
-                                        break
-                    except Exception as e:
-                        # Continue processing other results
-                        continue
-            
-            if scores:
-                averages[output_col][prompt_key] = sum(scores) / len(scores)
-            else:
-                averages[output_col][prompt_key] = None
-    
-    return averages
-
-
-def create_comparison_chart(avg_scores, prompt_keys, output_cols):
-    """
-    Create a comparison chart using Plotly (original bar chart)
-    """
-    # Check if we have any scores to display
-    has_scores = False
-    for output_col in output_cols:
-        if output_col in avg_scores:
-            for prompt_key in prompt_keys:
-                if prompt_key in avg_scores[output_col] and avg_scores[output_col][prompt_key] is not None:
-                    has_scores = True
-                    break
-            if has_scores:
-                break
-    
-    if not has_scores:
-        # Create an empty figure with a message
-        fig = go.Figure()
-        fig.update_layout(
-            title="No scores available for visualization",
-            annotations=[dict(
-                text="No numeric scores were found in the evaluation results. Check that your evaluation prompts return a score value.",
-                showarrow=False,
-                xref="paper",
-                yref="paper",
-                x=0.5,
-                y=0.5
-            )]
-        )
-        return fig
-    
-    # Combine all figures into a single stacked figure
-    combined_fig = go.Figure()
-    
-    try:
-        # Let's create a grouped bar chart
-        for i, output_col in enumerate(output_cols):
-            scores = []
-            for prompt_key in prompt_keys:
-                if output_col in avg_scores and prompt_key in avg_scores[output_col]:
-                    score = avg_scores[output_col][prompt_key]
-                    if score is not None:
-                        scores.append(score)
-                    else:
-                        scores.append(0)
-                else:
-                    scores.append(0)
-            
-            combined_fig.add_trace(go.Bar(
-                y=prompt_keys,
-                x=scores,
-                name=output_col,
-                orientation='h',
-                text=[f"{score:.2f}" if score > 0 else "N/A" for score in scores],
-                textposition='auto'
-            ))
-        
-        # Update layout
-        combined_fig.update_layout(
-            title="Comparison of Output Columns Across Metrics",
-            xaxis_title="Score",
-            yaxis_title="Metric",
-            barmode='group',
-            height=300 + (50 * len(prompt_keys)),
-            legend=dict(
-                orientation="h",
-                yanchor="bottom",
-                y=1.02,
-                xanchor="right",
-                x=1
-            )
-        )
-    except Exception as e:
-        st.error(f"Error creating visualization: {e}")
-        # Create a basic error figure
-        combined_fig = go.Figure()
-        combined_fig.update_layout(
-            title="Error creating visualization",
-            annotations=[dict(
-                text=f"An error occurred: {str(e)}",
-                showarrow=False,
-                xref="paper",
-                yref="paper",
-                x=0.5,
-                y=0.5
-            )]
-        )
-    
-    return combined_fig
-
-
-def create_spider_chart(avg_scores, prompt_keys, output_cols):
-    """
-    Create a radar chart with outlined traces for better visibility
-    """
-    import plotly.graph_objects as go
-    import pandas as pd
-    import numpy as np
-    
-    # Convert structure for easier processing
-    df = pd.DataFrame(index=prompt_keys)
-    
-    # Build a dataframe with output columns and metrics
-    for output_col in output_cols:
-        values = []
-        for prompt_key in prompt_keys:
-            if output_col in avg_scores and prompt_key in avg_scores[output_col]:
-                score = avg_scores[output_col][prompt_key]
-                df.loc[prompt_key, output_col] = score if score is not None else 0
-            else:
-                df.loc[prompt_key, output_col] = 0
-    
-    # Extract the metric names to make them more readable
-    shortened_metrics = []
-    for key in prompt_keys:
-        if "::" in key:
-            parts = key.split("::")
-            if len(parts) > 1:
-                shortened_metrics.append(parts[-1])
-            else:
-                shortened_metrics.append(key)
-        else:
-            shortened_metrics.append(key)
-    
-    # Create a radar chart
-    fig = go.Figure()
-    
-    # Define colors with higher contrast
-    colors = ['rgba(31, 119, 180, 1)', 'rgba(255, 127, 14, 1)', 
-              'rgba(44, 160, 44, 1)', 'rgba(214, 39, 40, 1)',
-              'rgba(148, 103, 189, 1)', 'rgba(140, 86, 75, 1)']
-    
-    # Add a trace for EACH output column
-    for i, output_col in enumerate(df.columns):
-        # Get values for this output column
-        values = df[output_col].tolist()
-        
-        # Get a color for this trace
-        color_idx = i % len(colors)
-        color = colors[color_idx]
-        
-        # Add the trace with NO fill but with lines
-        fig.add_trace(go.Scatterpolar(
-            r=values,
-            theta=shortened_metrics,
-            fill=None,  # No fill
-            mode='lines+markers',  # Lines and markers
-            line=dict(
-                color=color,
-                width=3  # Thicker lines
-            ),
-            marker=dict(
-                size=8,  # Bigger markers
-                color=color
-            ),
-            name=output_col
-        ))
-    
-    # Calculate max value for scaling
-    max_value = 1.0
-    
-    # Update layout for better visibility
-    fig.update_layout(
-        polar=dict(
-            radialaxis=dict(
-                visible=True,
-                range=[0, max_value],
-                tickfont=dict(size=12),
-                linewidth=2,
-                gridwidth=1
-            ),
-            angularaxis=dict(
-                tickfont=dict(size=14, color='black'),
-                linewidth=2,
-                gridwidth=1
-            )
-        ),
-        showlegend=True,
-        legend=dict(
-            font=dict(size=14),
-            borderwidth=1
-        ),
-        height=600,
-        width=800,  # Larger size
-        margin=dict(l=80, r=80, t=50, b=50)  # More margin space
-    )
-    
-    return fig
-
-
-def create_evaluation_summary(avg_scores, prompt_keys, output_cols):
-    """
-    Create a summary of scores, maximums, and percentages
-    that only counts metrics that were actually run
-    """
-    import pandas as pd
-    import plotly.graph_objects as go
-    import numpy as np
-    
-    # First, create a dataframe with all the scores
-    summary_df = pd.DataFrame(index=output_cols)
-    
-    # Set maximum score per item to 1 (0-1 scale)
-    max_score_per_item = 1
-    
-    # Track which metrics were actually run for each output column
-    metrics_run = {output_col: [] for output_col in output_cols}
-    
-    # For each metric
-    for prompt_key in prompt_keys:
-        metric_name = prompt_key.split("::")[-1] if "::" in prompt_key else prompt_key
-        
-        for output_col in output_cols:
-            if output_col in avg_scores and prompt_key in avg_scores[output_col]:
-                score = avg_scores[output_col][prompt_key]
-                if score is not None:
-                    summary_df.loc[output_col, metric_name] = score
-                    # Track that this metric was actually run
-                    metrics_run[output_col].append(metric_name)
-                else:
-                    summary_df.loc[output_col, metric_name] = 0
-            else:
-                summary_df.loc[output_col, metric_name] = 0
-    
-    # Calculate row totals - only for metrics that were actually run
-    for output_col in output_cols:
-        # Calculate the total score for metrics that were run
-        total_score = sum(summary_df.loc[output_col, metric] for metric in metrics_run[output_col])
-        summary_df.loc[output_col, "Total"] = total_score
-        
-        # Set max possible based on number of metrics actually run
-        max_possible = len(metrics_run[output_col]) * max_score_per_item
-        summary_df.loc[output_col, "Max Possible"] = max_possible
-        
-        # Calculate percentage
-        if max_possible > 0:
-            summary_df.loc[output_col, "Percentage"] = (total_score / max_possible * 100).round(1)
-        else:
-            summary_df.loc[output_col, "Percentage"] = 0
-    
-    # Create score bars visualization
-    create_score_bars(summary_df, max_score_per_item)
-    
-    return summary_df
-
-
-def create_score_bars(summary_df, max_score_per_item):
-    """
-    Create interactive bar charts showing scores, totals, and percentages
-    with correct scale and only counting metrics that were run
-    """
-    import plotly.graph_objects as go
-    
-    # Remove utility columns for visualization
-    viz_df = summary_df.drop(columns=["Max Possible", "Percentage"])
-    
-    # Create a second chart for totals
-    fig2 = go.Figure()
-    
-    # Add total scores bars
-    fig2.add_trace(go.Bar(
-        x=summary_df.index,
-        y=summary_df["Total"],
-        marker_color='royalblue',
-        text=summary_df["Total"].round(2),
-        textposition='auto',
-        name="Total Score"
-    ))
-    
-    # Add percentage as a line
-    fig2.add_trace(go.Scatter(
-        x=summary_df.index,
-        y=summary_df["Percentage"],
-        mode='lines+markers+text',
-        marker=dict(size=10, color='red'),
-        line=dict(width=3, dash='dot', color='red'),
-        text=summary_df["Percentage"].round(1).astype(str) + '%',
-        textposition='top center',
-        yaxis='y2',
-        name="Percentage of Maximum"
-    ))
-    
-    # Add a line for each model's maximum possible score
-    for i, idx in enumerate(summary_df.index):
-        max_val = summary_df.loc[idx, "Max Possible"]
-        fig2.add_trace(go.Scatter(
-            x=[idx],
-            y=[max_val],
-            mode='markers',
-            marker=dict(
-                symbol='line-ns',
-                size=16,
-                color='gray',
-                line=dict(width=2)
-            ),
-            name=f"Max for {idx}" if i == 0 else None,  # Only add to legend once
-            showlegend=(i == 0)
-        ))
-    
-    # Customize layout for totals chart
-    max_y_value = max(summary_df["Max Possible"].max() * 1.1, summary_df["Total"].max() * 1.2)
-    
-    fig2.update_layout(
-        title="Total Scores and Percentages by Model (only counting metrics that were run)",
-        xaxis_title="Model",
-        yaxis=dict(
-            title="Total Score",
-            range=[0, max_y_value]
-        ),
-        yaxis2=dict(
-            title=dict(
-                text="Percentage",
-                font=dict(color='red'),
-            ),
-            tickfont=dict(color='red'),
-            overlaying='y',
-            side='right',
-            range=[0, 110],
-            ticksuffix='%'
-        ),
-        height=400,
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.02,
-            xanchor="center",
-            x=0.5
-        )
-    )
-    
-    # Display chart
-    st.plotly_chart(fig2, use_container_width=True)
-
-
-def _display_tab_content(output_results, prompt_keys):
-    """Helper function to display the content of a result tab with averages"""
-    # Create a dataframe from the results
-    rows = []
-    metric_values = {prompt_key: [] for prompt_key in prompt_keys}  # To track values for averaging
-    
-    for result in output_results:
-        row_data = {"Row": result.get("row_index", "N/A")}
-        
-        if result.get("status") == "skipped":
-            row_data.update({prompt_key: "SKIPPED" for prompt_key in prompt_keys})
-            row_data["Reason"] = result.get("reason", "Unknown")
-        else:
-            for prompt_key in prompt_keys:
-                eval_result = result.get("evals", {}).get(prompt_key, "N/A")
-                
-                # Parse the JSON result if possible
-                try:
-                    if isinstance(eval_result, str):
-                        eval_data = json.loads(eval_result)
-                        if "score" in eval_data:
-                            score = float(eval_data["score"])
-                            row_data[prompt_key] = score
-                            metric_values[prompt_key].append(score)
-                        else:
-                            # Try to find any numeric value
-                            found_numeric = False
-                            for k, v in eval_data.items():
-                                if isinstance(v, (int, float)):
-                                    score = float(v)
-                                    row_data[prompt_key] = score
-                                    metric_values[prompt_key].append(score)
-                                    found_numeric = True
-                                    break
-                            
-                            if not found_numeric:
-                                row_data[prompt_key] = "See details"
-                    else:
-                        row_data[prompt_key] = "See details"
-                except:
-                    row_data[prompt_key] = "See details"
-        
-        rows.append(row_data)
-    
-    if rows:
-        # Create a new row for averages
-        avg_row = {"Row": "AVERAGE"}
-        
-        # Calculate average for each metric
-        for prompt_key, values in metric_values.items():
-            if values:  # Only calculate if we have numeric values
-                avg_row[prompt_key] = sum(values) / len(values)
-            else:
-                avg_row[prompt_key] = "N/A"
-        
-        # Add this row to the dataframe
-        results_df = pd.DataFrame(rows)
-        
-        # Display the regular results table
-        st.dataframe(results_df)
-        
-        # Display the average row in a separate, highlighted table
-        avg_df = pd.DataFrame([avg_row])
-        st.markdown("### Average Scores")
-        st.dataframe(avg_df, use_container_width=True)
-        
-        # Add detailed expandable sections for each result
-        for j, result in enumerate(output_results):
-            if result.get("status") != "skipped":
-                with st.expander(f"Detailed Results for Row {result.get('row_index', j)}"):
-                    for prompt_key, eval_result in result.get("evals", {}).items():
-                        st.markdown(f"**{prompt_key}**")
-                        
-                        # Try to prettify JSON
-                        try:
-                            if isinstance(eval_result, str):
-                                eval_data = json.loads(eval_result)
-                                st.json(eval_data)
-                            else:
-                                st.write(eval_result)
-                        except:
-                            st.write(eval_result)
-    else:
-        st.info("No evaluation results to display for this output column.")
-
-
-def display_evaluation_results_multi_output(results, prompt_keys, output_cols):
-    """
-    Display evaluation results for multiple output columns in a formatted way
-    With comparison tab first for 2+ columns
-    """
-    st.subheader("Evaluation Results")
-    
-    # Calculate average scores for visualization
-    avg_scores = calculate_average_scores(results, prompt_keys)
-    
-    # UPDATED CONDITION: For 2+ columns, show comparison first
-    if len(output_cols) >= 2:
-        # Create comparison tab first
-        tab1 = st.tabs(["Comparison"])[0]
-        with tab1:
-            st.subheader("Comparison of Average Scores")
-            
-            # Bar chart comparison
-            fig = create_comparison_chart(avg_scores, prompt_keys, output_cols)
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Try to add spider chart with error handling
-            st.subheader("Radar Chart Comparison")
-            try:
-                spider_fig = create_spider_chart(avg_scores, prompt_keys, output_cols)
-                st.plotly_chart(spider_fig)
-                
-            except Exception as e:
-                st.error(f"Could not create radar chart: {str(e)}")
-
-            # Summary section with totals, maximums, and percentages
-            summary_df = create_evaluation_summary(avg_scores, prompt_keys, output_cols)
-        
-        # Then create all the individual result tabs
-        result_tabs = st.tabs([f"Results: {col}" for col in output_cols])
-        for i, output_col in enumerate(output_cols):
-            with result_tabs[i]:
-                _display_tab_content(results[output_col], prompt_keys)
-                
-    else:
-        # For a single column, use original ordering (result first, then comparison)
-        result_tabs = st.tabs([f"Results: {col}" for col in output_cols])
-        for i, output_col in enumerate(output_cols):
-            with result_tabs[i]:
-                _display_tab_content(results[output_col], prompt_keys)
-        
-        # Add comparison at the end
-        comparison_tab = st.tabs(["Comparison"])[0]
-        with comparison_tab:
-            st.subheader("Comparison of Average Scores")
-            
-            # Bar chart
-            fig = create_comparison_chart(avg_scores, prompt_keys, output_cols)
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Try to add spider chart with error handling
-            st.subheader("Radar Chart Comparison")
-            try:
-                spider_fig = create_spider_chart(avg_scores, prompt_keys, output_cols)
-                st.plotly_chart(spider_fig)
-                
-                st.markdown("""
-                **How to read this chart:**
-                
-                - Each axis represents a metric
-                - Each colored line represents an output column
-                - Points further from center have higher scores
-                - Compare the shapes to see strengths/weaknesses
-                """)
-            except Exception as e:
-                st.error(f"Could not create radar chart: {str(e)}")
-            
-            # Summary section with totals, maximums, and percentages
-            summary_df = create_evaluation_summary(avg_scores, prompt_keys, output_cols)
-
-
-# ====== PARALLEL PROCESSING FUNCTIONS ========
 
 
 def run_parallel_batch_evaluations(client, evaluation_model, parameter_prompts, data_rows, 
@@ -638,23 +97,21 @@ def run_parallel_batch_evaluations(client, evaluation_model, parameter_prompts, 
             for row_idx, row in enumerate(current_batch):
                 global_row_idx = batch_start + row_idx
                 
-                # Get input text and convert to string safely
-                input_text = str(row[input_col]) if input_col and row[input_col] is not None else ""
+                # Get input text
+                input_text = row[input_col] if input_col else ""
                 
                 # Process each output column
                 for output_col in output_cols:
-                    output_text = str(row[output_col]) if output_col and row[output_col] is not None else ""
+                    output_text = row[output_col] if output_col else ""
                     
-                    # Skip if missing required data (after converting to string)
-                    if (input_col and not input_text.strip()) or not output_text.strip():
+                    # Skip if missing required data
+                    if (input_col and not input_text) or not output_text:
                         continue
                     
                     # Process each parameter prompt
                     for prompt_key, prompt_template in parameter_prompts.items():
-                        # Format the template with actual data - ensure all values are strings
-                        safe_input = str(input_text) if input_text is not None else ""
-                        safe_output = str(output_text) if output_text is not None else ""
-                        formatted_prompt = prompt_template.replace("{input}", safe_input).replace("{output}", safe_output)
+                        # Format the template with actual data
+                        formatted_prompt = prompt_template.replace("{input}", input_text).replace("{output}", output_text)
                         
                         # Create task tuple
                         task = (
@@ -826,15 +283,11 @@ def show_intermediate_results(batch_results, parameter_prompts, output_cols):
 
 def add_tab3_content_parallel():
     """
-    Enhanced Tab 3 with parallel processing AND complete visualization suite
-    - 5 parallel threads for fast processing
-    - Automatic saving every 5 rows  
-    - Resume capability if interrupted
-    - Full charts, radar plots, and detailed analysis
-    - All the visualization power of the original Tab 3
+    Enhanced Tab 3 with parallel processing and robust session management
+    This version focuses on fast, reliable processing with basic result display
     """
-    # st.header("Individual Evaluations (Parallel Processing)")
-    st.info("Upload a dataset to evaluate each output using the generated metrics. Processes rows in parallel with automatic saving between batches.")
+    st.header("Individual Evaluations (Parallel Processing)")
+    st.info("Upload a dataset to evaluate each output using the generated metrics. Processes 5 rows in parallel with automatic saving between batches.")
     
     # Check if metrics are available
     if not st.session_state.pipeline_results:
@@ -991,13 +444,13 @@ def add_tab3_content_parallel():
             with col3:
                 max_workers = st.selectbox(
                     "Parallel Threads",
-                    [3, 5, 8, 10, 15, 20],
+                    [3, 5, 8, 10],
                     index=1,  # Default to 5
                     help="Number of parallel threads (more = faster but more resource intensive)"
                 )
             
             # Show batch processing info
-            st.info(f"🔄 **Parallel Processing**: {max_workers} threads will process 10 rows at a time, with results saved after each batch to prevent data loss.")
+            st.info(f"🔄 **Parallel Processing**: {max_workers} threads will process 5 rows at a time, with results saved after each batch to prevent data loss.")
             
             # Validation
             if is_conversation and not output_cols:
@@ -1041,7 +494,7 @@ def add_tab3_content_parallel():
                             data_rows=data_to_evaluate,
                             input_col=input_col,
                             output_cols=output_cols,
-                            batch_size=10,
+                            batch_size=5,
                             max_workers=max_workers
                         )
                         
@@ -1057,12 +510,28 @@ def add_tab3_content_parallel():
                             if key.startswith("batch_eval"):
                                 del st.session_state[key]
                         
-                        # Display full results with all visualizations
+                        # Store results and show success message
                         st.markdown("---")
-                        st.subheader("📊 Complete Evaluation Results")
+                        st.subheader("📊 Evaluation Complete!")
                         
-                        # Use the full visualization function
-                        display_evaluation_results_multi_output(results, list(selected_metrics.keys()), output_cols)
+                        st.success(f"✅ All evaluations completed successfully!")
+                        st.success(f"📊 Processed {len(results)} output columns with {len(data_to_evaluate)} rows each")
+                        
+                        # Show summary
+                        for output_col, col_results in results.items():
+                            st.write(f"**{output_col}**: {len(col_results)} rows evaluated")
+                        
+                        # Show simple preview of results
+                        st.subheader("Preview of Results")
+                        if results:
+                            first_output = list(results.keys())[0]
+                            first_few_results = results[first_output][:3]  # Show first 3 rows
+                            
+                            for i, result in enumerate(first_few_results):
+                                with st.expander(f"Sample Result - Row {result.get('row_index', i)}"):
+                                    st.json(result.get('evals', {}))
+                        
+                        st.info("💡 **Next Steps**: Your results are saved! You can run additional evaluations or download the results.")
                         
                     except Exception as e:
                         st.error(f"❌ Error during evaluation: {e}")
@@ -1082,33 +551,24 @@ def add_tab3_content_parallel():
         selected_metric_keys = st.session_state.get("selected_metric_keys", list(parameter_templates.keys()))
         selected_output_cols = st.session_state.get("selected_output_cols", list(st.session_state.multi_evaluation_results.keys()))
         
-        # Display previous results with full visualizations
-        st.subheader("Previous Evaluation Results")
-        st.info("Showing results from your last evaluation run with full charts and analysis.")
+        # Show previous results with simple display
+        st.info("📊 Previous evaluation results are available in session state.")
         
-        # Use the complete visualization function
-        display_evaluation_results_multi_output(
-            st.session_state.multi_evaluation_results,
-            selected_metric_keys,
-            selected_output_cols
-        )
+        # Simple display of previous results
+        if st.button("🔍 Show Results Summary"):
+            st.subheader("Results Summary")
+            for output_col, col_results in st.session_state.multi_evaluation_results.items():
+                st.write(f"**{output_col}**: {len(col_results)} rows evaluated")
+                
+                # Show sample result
+                if col_results:
+                    with st.expander(f"Sample result from {output_col}"):
+                        st.json(col_results[0].get('evals', {}))
+        
+        st.info("💡 **Tip**: For detailed charts and analysis, use the regular Tab 3 (Individual Eval) which has full visualization features.")
 
 
-# Helper functions for file processing (copied to avoid import issues)
-def read_excel_file(uploaded_file):
-    """
-    Read an Excel (XLSX or XLS) file
-    """
-    import pandas as pd
-    return pd.read_excel(uploaded_file)
-
-def read_csv_file(uploaded_file):
-    """
-    Read a CSV file
-    """
-    import pandas as pd
-    return pd.read_csv(uploaded_file)
-
+# Helper function for file processing (keeping from original)
 def process_uploaded_file_individual(uploaded_file):
     """
     Process the uploaded file based on its type
@@ -1116,11 +576,9 @@ def process_uploaded_file_individual(uploaded_file):
     file_type = uploaded_file.name.split('.')[-1].lower()
     
     if file_type == 'csv':
-        df = read_csv_file(uploaded_file)
+        return pd.read_csv(uploaded_file)
     elif file_type in ['xlsx', 'xls']:
-        df = read_excel_file(uploaded_file)
+        return pd.read_excel(uploaded_file)
     else:
         st.error(f"Unsupported file type: {file_type}")
         return None
-    
-    return df

@@ -638,23 +638,21 @@ def run_parallel_batch_evaluations(client, evaluation_model, parameter_prompts, 
             for row_idx, row in enumerate(current_batch):
                 global_row_idx = batch_start + row_idx
                 
-                # Get input text and convert to string safely
-                input_text = str(row[input_col]) if input_col and row[input_col] is not None else ""
+                # Get input text
+                input_text = row[input_col] if input_col else ""
                 
                 # Process each output column
                 for output_col in output_cols:
-                    output_text = str(row[output_col]) if output_col and row[output_col] is not None else ""
+                    output_text = row[output_col] if output_col else ""
                     
-                    # Skip if missing required data (after converting to string)
-                    if (input_col and not input_text.strip()) or not output_text.strip():
+                    # Skip if missing required data
+                    if (input_col and not input_text) or not output_text:
                         continue
                     
                     # Process each parameter prompt
                     for prompt_key, prompt_template in parameter_prompts.items():
-                        # Format the template with actual data - ensure all values are strings
-                        safe_input = str(input_text) if input_text is not None else ""
-                        safe_output = str(output_text) if output_text is not None else ""
-                        formatted_prompt = prompt_template.replace("{input}", safe_input).replace("{output}", safe_output)
+                        # Format the template with actual data
+                        formatted_prompt = prompt_template.replace("{input}", input_text).replace("{output}", output_text)
                         
                         # Create task tuple
                         task = (
@@ -833,8 +831,8 @@ def add_tab3_content_parallel():
     - Full charts, radar plots, and detailed analysis
     - All the visualization power of the original Tab 3
     """
-    # st.header("Individual Evaluations (Parallel Processing)")
-    st.info("Upload a dataset to evaluate each output using the generated metrics. Processes rows in parallel with automatic saving between batches.")
+    st.header("Individual Evaluations (Parallel Processing)")
+    st.info("Upload a dataset to evaluate each output using the generated metrics. Processes 5 rows in parallel with automatic saving between batches.")
     
     # Check if metrics are available
     if not st.session_state.pipeline_results:
@@ -991,13 +989,13 @@ def add_tab3_content_parallel():
             with col3:
                 max_workers = st.selectbox(
                     "Parallel Threads",
-                    [3, 5, 8, 10, 15, 20],
+                    [3, 5, 8, 10],
                     index=1,  # Default to 5
                     help="Number of parallel threads (more = faster but more resource intensive)"
                 )
             
             # Show batch processing info
-            st.info(f"🔄 **Parallel Processing**: {max_workers} threads will process 10 rows at a time, with results saved after each batch to prevent data loss.")
+            st.info(f"🔄 **Parallel Processing**: {max_workers} threads will process 5 rows at a time, with results saved after each batch to prevent data loss.")
             
             # Validation
             if is_conversation and not output_cols:
@@ -1041,7 +1039,7 @@ def add_tab3_content_parallel():
                             data_rows=data_to_evaluate,
                             input_col=input_col,
                             output_cols=output_cols,
-                            batch_size=10,
+                            batch_size=5,
                             max_workers=max_workers
                         )
                         

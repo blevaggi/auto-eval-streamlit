@@ -823,11 +823,10 @@ def main():
     # Sidebar: API configuration 
     with st.sidebar:
         st.header("GenAI API Configuration")
-        st.info("Using internal GenAI API - no keys required! But turn VPN on.")
+        st.info("Using internal GenAI API proxy - no API key required!")
         
         # Show available models with vendor info
         model_options = [
-            "o3-2025-04-16 (OpenAI)"
             "gpt-4o-2024-05-13 (OpenAI)",
             "gpt-4o-mini-2024-07-18 (OpenAI)", 
             "gpt-4.1-2025-04-14 (OpenAI)",
@@ -861,6 +860,13 @@ def main():
             st.write(f"📋 Model: {st.session_state.get('model', 'Not set')}")
         else:
             st.warning("⚠️ GenAI API Not Connected")
+
+        # # And update the save button section:
+        if st.button("💾 Click to save your key!"):
+            # For GenAI API, we don't actually need the key, but keep the flow for user experience
+            st.session_state.client = initialize_client()  # Remove api_key parameter
+            st.session_state.model = model
+            st.success("Configuration saved! Using internal GenAI API.")
 
     tab1, tab2, tab3, tab4  = st.tabs(["Generate Eval Metrics", "Review Each Metric", "Individual Eval", "Pairwise Eval"])
         
@@ -980,23 +986,17 @@ Tone must be professional
         st.subheader("Run Pipeline", divider=True)
         if st.button("Generate Customized Metrics"):
             
-            # FIXED: Check if we have a connected client instead of api_key
-            if not st.session_state.get('client'):
-                st.error("Please initialize the GenAI client in the sidebar first.")
+            if not api_key:
+                st.error("Please provide an API key in the sidebar first.")
             elif not requirements:
                 st.error("Task requirements are required.")
             else:
-                # FIXED: Use the client from session state, no need to pass api_key
-                client = st.session_state.client
+                client = initialize_client(api_key)
                 model_used = st.session_state.model
-                
-                # Parse requirements into a list
-                requirements_list = [req.strip() for req in requirements.split('\n') if req.strip()]
-                
                 with st.spinner("Processing..."):
                     st.session_state.pipeline_results = setup_evaluation_config(
                         task_summary=task_summary,
-                        requirements=requirements_list,  # FIXED: Pass as list
+                        requirements=requirements,
                         sample_input=sample_input,
                         good_examples=good_examples_list,
                         bad_examples=bad_examples_list,
@@ -1045,13 +1045,13 @@ Tone must be professional
 
     with tab3:
         st.header("Individual Evaluations")
-        # Use parallel processing by default
-        from tab_3 import add_tab3_content_parallel as add_tab3_content
+        st.info("Upload a dataset to evaluate each output using the generated metrics")
+        from tab_3 import add_tab3_content
         add_tab3_content()
     
     with tab4:
-        from tab_4 import add_tab4_content_parallel
-        add_tab4_content_parallel()
+        from tab_4 import add_tab4_content_improved
+        add_tab4_content_improved()
 
 
 if __name__ == "__main__":

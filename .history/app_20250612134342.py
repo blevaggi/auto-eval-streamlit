@@ -11,8 +11,6 @@ import concurrent.futures
 from functools import partial
 import time
 import re
-from genai_utils import initialize_client, create_client_with_model, get_headers_for_model
-
 
 # ====== TAB 1 FUNCTIONS ========
 # This tab accepts the use case details, the API permissions, and generates the custom eval and prompt templates
@@ -27,6 +25,24 @@ st.set_page_config(
 )
 
 # STEP TWO: User fills out the sidebar with OpenAI permissions
+
+def initialize_client(api_key=None):
+    """Initialize with GenAI API client"""
+    # The api_key parameter is now optional since we use a placeholder
+    
+    # Set up GenAI API headers for tracking
+    gen_ai_api_headers = {
+        "X-Vendor": "openai",  # You can change this based on which vendor/model you're using
+        "X-Model": "gpt-4o-2024-05-13",  # Default model, can be overridden per request
+        "X-Source": "streamlit_eval_app",
+        "X-Usecase": "AutoEval_Pipeline_App",  # Format: Team_StoryId_UseCase
+    }
+    
+    return OpenAI(
+        base_url="http://generativeaiapi.stg.justanswer.local",
+        api_key="FAKE_API_KEY",  # Placeholder only - not used by proxy
+        default_headers=gen_ai_api_headers
+    )
 
 # STEP THREE: User gives us information about their evaluation use case
 
@@ -790,6 +806,39 @@ def load_metrics_from_file():
     return None
 
 
+def get_headers_for_model(model_name):
+    """
+    Generate appropriate headers for the GenAI API based on the model being used
+    """
+    # Extract vendor from model name
+    if "gpt" in model_name.lower() or "o1" in model_name.lower() or "o3" in model_name.lower():
+        vendor = "openai"
+    elif "claude" in model_name.lower():
+        vendor = "anthropic" 
+    elif "gemini" in model_name.lower():
+        vendor = "google"
+    else:
+        vendor = "openai"  # Default fallback
+    
+    return {
+        "X-Vendor": vendor,
+        "X-Model": model_name,
+        "X-Source": "streamlit_eval_app",
+        "X-Usecase": "AutoEval_Pipeline_App",
+    }
+
+def create_client_with_model(model_name):
+    """
+    Create an OpenAI client with headers set for the specific model
+    """
+    headers = get_headers_for_model(model_name)
+    
+    return OpenAI(
+        base_url="http://generativeaiapi.stg.justanswer.local",
+        api_key="FAKE_API_KEY",
+        default_headers=headers
+    )
+
 
 # ====== TAB 3 FUNCTIONS ========
 
@@ -823,11 +872,10 @@ def main():
     # Sidebar: API configuration 
     with st.sidebar:
         st.header("GenAI API Configuration")
-        st.info("Using internal GenAI API - no keys required! But turn VPN on.")
+        st.info("Using internal GenAI API proxy - no API key required!")
         
         # Show available models with vendor info
         model_options = [
-            "o3-2025-04-16 (OpenAI)"
             "gpt-4o-2024-05-13 (OpenAI)",
             "gpt-4o-mini-2024-07-18 (OpenAI)", 
             "gpt-4.1-2025-04-14 (OpenAI)",
@@ -861,6 +909,13 @@ def main():
             st.write(f"📋 Model: {st.session_state.get('model', 'Not set')}")
         else:
             st.warning("⚠️ GenAI API Not Connected")
+
+        # # And update the save button section:
+        if st.button("💾 Click to save your key!"):
+            # For GenAI API, we don't actually need the key, but keep the flow for user experience
+            st.session_state.client = initialize_client()  # Remove api_key parameter
+            st.session_state.model = model
+            st.success("Configuration saved! Using internal GenAI API.")
 
     tab1, tab2, tab3, tab4  = st.tabs(["Generate Eval Metrics", "Review Each Metric", "Individual Eval", "Pairwise Eval"])
         
@@ -980,23 +1035,17 @@ Tone must be professional
         st.subheader("Run Pipeline", divider=True)
         if st.button("Generate Customized Metrics"):
             
-            # FIXED: Check if we have a connected client instead of api_key
-            if not st.session_state.get('client'):
-                st.error("Please initialize the GenAI client in the sidebar first.")
+            if not api_key:
+                st.error("Please provide an API key in the sidebar first.")
             elif not requirements:
                 st.error("Task requirements are required.")
             else:
-                # FIXED: Use the client from session state, no need to pass api_key
-                client = st.session_state.client
+                client = initialize_client(api_key)
                 model_used = st.session_state.model
-                
-                # Parse requirements into a list
-                requirements_list = [req.strip() for req in requirements.split('\n') if req.strip()]
-                
                 with st.spinner("Processing..."):
                     st.session_state.pipeline_results = setup_evaluation_config(
                         task_summary=task_summary,
-                        requirements=requirements_list,  # FIXED: Pass as list
+                        requirements=requirements,
                         sample_input=sample_input,
                         good_examples=good_examples_list,
                         bad_examples=bad_examples_list,
@@ -1045,13 +1094,13 @@ Tone must be professional
 
     with tab3:
         st.header("Individual Evaluations")
-        # Use parallel processing by default
-        from tab_3 import add_tab3_content_parallel as add_tab3_content
+        st.info("Upload a dataset to evaluate each output using the generated metrics")
+        from tab_3 import add_tab3_content
         add_tab3_content()
     
     with tab4:
-        from tab_4 import add_tab4_content_parallel
-        add_tab4_content_parallel()
+        from tab_4 import add_tab4_content_improved
+        add_tab4_content_improved()
 
 
 if __name__ == "__main__":
