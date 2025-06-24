@@ -41,8 +41,8 @@ def get_headers_for_model(model_name):
     return {
         "X-Vendor": vendor,
         "X-Model": model_name,
-        "X-Source": "streamlit_eval_app",
-        "X-Usecase": "AutoEval_Pipeline_App",
+        "X-Source": "streamlit",
+        "X-Usecase": "Cyborgs_12345_EvalApp",
     }
 
 
